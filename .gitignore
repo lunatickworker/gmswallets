@@ -1,0 +1,6 @@
+guidelines/
+*.sql
+*.md
+.env
+.env.*
+node_modules/
