@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
-import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw, Copy, KeyRound } from "lucide-react";
+import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, api } from "./shared";
 
@@ -18,34 +18,33 @@ export interface Partner {
   fee_rate: number;
   sub_count: number;
   status: "active" | "inactive";
-  phone: string;
-  email?: string;
+  contact: string;
   created_at: string;
 }
 
 export const MOCK_MASTERS: Partner[] = [
-  { id: "m1", name: "강남마스터", code: "MAS-001", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 2.0, sub_count: 2, status: "active", phone: "010-1234-5678", created_at: "2024-01-10T09:00:00Z" },
-  { id: "m2", name: "서초마스터", code: "MAS-002", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 1.5, sub_count: 3, status: "active", phone: "010-2345-6789", created_at: "2024-02-15T10:00:00Z" },
-  { id: "m3", name: "송파마스터", code: "MAS-003", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 1.8, sub_count: 1, status: "inactive", phone: "010-3456-7890", created_at: "2024-03-20T11:00:00Z" },
+  { id: "m1", name: "강남마스터", code: "MAS-001", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 2.0, sub_count: 2, status: "active", contact: "010-1234-5678", created_at: "2024-01-10T09:00:00Z" },
+  { id: "m2", name: "서초마스터", code: "MAS-002", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 1.5, sub_count: 3, status: "active", contact: "010-2345-6789", created_at: "2024-02-15T10:00:00Z" },
+  { id: "m3", name: "송파마스터", code: "MAS-003", type: "master", parent_id: null, parent_name: null, grandparent_name: null, fee_rate: 1.8, sub_count: 1, status: "inactive", contact: "010-3456-7890", created_at: "2024-03-20T11:00:00Z" },
 ];
 
 export const MOCK_DISTRIBUTORS: Partner[] = [
-  { id: "d1", name: "강남총판A", code: "DIS-001", type: "distributor", parent_id: "m1", parent_name: "강남마스터", grandparent_name: null, fee_rate: 1.5, sub_count: 3, status: "active", phone: "010-4567-8901", created_at: "2024-01-20T09:00:00Z" },
-  { id: "d2", name: "강남총판B", code: "DIS-002", type: "distributor", parent_id: "m1", parent_name: "강남마스터", grandparent_name: null, fee_rate: 1.0, sub_count: 2, status: "active", phone: "010-5678-9012", created_at: "2024-02-01T09:00:00Z" },
-  { id: "d3", name: "서초총판A", code: "DIS-003", type: "distributor", parent_id: "m2", parent_name: "서초마스터", grandparent_name: null, fee_rate: 1.2, sub_count: 4, status: "active", phone: "010-6789-0123", created_at: "2024-03-05T09:00:00Z" },
-  { id: "d4", name: "서초총판B", code: "DIS-004", type: "distributor", parent_id: "m2", parent_name: "서초마스터", grandparent_name: null, fee_rate: 1.0, sub_count: 1, status: "active", phone: "010-7890-1234", created_at: "2024-04-10T09:00:00Z" },
-  { id: "d5", name: "송파총판A", code: "DIS-005", type: "distributor", parent_id: "m3", parent_name: "송파마스터", grandparent_name: null, fee_rate: 1.3, sub_count: 2, status: "inactive", phone: "010-8901-2345", created_at: "2024-04-20T09:00:00Z" },
+  { id: "d1", name: "강남총판A", code: "DIS-001", type: "distributor", parent_id: "m1", parent_name: "강남마스터", grandparent_name: null, fee_rate: 1.5, sub_count: 3, status: "active", contact: "010-4567-8901", created_at: "2024-01-20T09:00:00Z" },
+  { id: "d2", name: "강남총판B", code: "DIS-002", type: "distributor", parent_id: "m1", parent_name: "강남마스터", grandparent_name: null, fee_rate: 1.0, sub_count: 2, status: "active", contact: "010-5678-9012", created_at: "2024-02-01T09:00:00Z" },
+  { id: "d3", name: "서초총판A", code: "DIS-003", type: "distributor", parent_id: "m2", parent_name: "서초마스터", grandparent_name: null, fee_rate: 1.2, sub_count: 4, status: "active", contact: "010-6789-0123", created_at: "2024-03-05T09:00:00Z" },
+  { id: "d4", name: "서초총판B", code: "DIS-004", type: "distributor", parent_id: "m2", parent_name: "서초마스터", grandparent_name: null, fee_rate: 1.0, sub_count: 1, status: "active", contact: "010-7890-1234", created_at: "2024-04-10T09:00:00Z" },
+  { id: "d5", name: "송파총판A", code: "DIS-005", type: "distributor", parent_id: "m3", parent_name: "송파마스터", grandparent_name: null, fee_rate: 1.3, sub_count: 2, status: "inactive", contact: "010-8901-2345", created_at: "2024-04-20T09:00:00Z" },
 ];
 
 export const MOCK_STORES: Partner[] = [
-  { id: "s1", name: "강남카페01", code: "STR-001", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0001-0001", created_at: "2024-02-01T09:00:00Z" },
-  { id: "s2", name: "강남편의점02", code: "STR-002", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0001-0002", created_at: "2024-02-05T09:00:00Z" },
-  { id: "s3", name: "강남약국03", code: "STR-003", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0001-0003", created_at: "2024-02-10T09:00:00Z" },
-  { id: "s4", name: "강남서점04", code: "STR-004", type: "store", parent_id: "d2", parent_name: "강남총판B", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0002-0001", created_at: "2024-02-15T09:00:00Z" },
-  { id: "s5", name: "강남헬스05", code: "STR-005", type: "store", parent_id: "d2", parent_name: "강남총판B", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "inactive", phone: "010-0002-0002", created_at: "2024-03-01T09:00:00Z" },
-  { id: "s6", name: "서초식당06", code: "STR-006", type: "store", parent_id: "d3", parent_name: "서초총판A", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0003-0001", created_at: "2024-03-10T09:00:00Z" },
-  { id: "s7", name: "서초카페07", code: "STR-007", type: "store", parent_id: "d3", parent_name: "서초총판A", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0003-0002", created_at: "2024-03-15T09:00:00Z" },
-  { id: "s8", name: "서초마트08", code: "STR-008", type: "store", parent_id: "d4", parent_name: "서초총판B", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", phone: "010-0004-0001", created_at: "2024-04-20T09:00:00Z" },
+  { id: "s1", name: "강남카페01", code: "STR-001", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0001-0001", created_at: "2024-02-01T09:00:00Z" },
+  { id: "s2", name: "강남편의점02", code: "STR-002", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0001-0002", created_at: "2024-02-05T09:00:00Z" },
+  { id: "s3", name: "강남약국03", code: "STR-003", type: "store", parent_id: "d1", parent_name: "강남총판A", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0001-0003", created_at: "2024-02-10T09:00:00Z" },
+  { id: "s4", name: "강남서점04", code: "STR-004", type: "store", parent_id: "d2", parent_name: "강남총판B", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0002-0001", created_at: "2024-02-15T09:00:00Z" },
+  { id: "s5", name: "강남헬스05", code: "STR-005", type: "store", parent_id: "d2", parent_name: "강남총판B", grandparent_name: "강남마스터", fee_rate: 0, sub_count: 0, status: "inactive", contact: "010-0002-0002", created_at: "2024-03-01T09:00:00Z" },
+  { id: "s6", name: "서초식당06", code: "STR-006", type: "store", parent_id: "d3", parent_name: "서초총판A", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0003-0001", created_at: "2024-03-10T09:00:00Z" },
+  { id: "s7", name: "서초카페07", code: "STR-007", type: "store", parent_id: "d3", parent_name: "서초총판A", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0003-0002", created_at: "2024-03-15T09:00:00Z" },
+  { id: "s8", name: "서초마트08", code: "STR-008", type: "store", parent_id: "d4", parent_name: "서초총판B", grandparent_name: "서초마스터", fee_rate: 0, sub_count: 0, status: "active", contact: "010-0004-0001", created_at: "2024-04-20T09:00:00Z" },
 ];
 
 // System-level fee rates (applied on top of partner fees)
@@ -73,8 +72,7 @@ export function PartnerFormModal({
     code: item?.code ?? "",
     parent_id: item?.parent_id ?? "",
     fee_rate: item ? String(item.fee_rate) : "1.0",
-    phone: item?.phone ?? "",
-    email: item?.email ?? "",
+    contact: item?.contact ?? "",
     status: item?.status ?? "active",
   });
 
@@ -96,8 +94,7 @@ export function PartnerFormModal({
       fee_rate: parseFloat(form.fee_rate) || 0,
       sub_count: item?.sub_count ?? 0,
       status: form.status as "active" | "inactive",
-      phone: form.phone,
-      email: form.email,
+      contact: form.contact,
       created_at: item?.created_at ?? new Date().toISOString(),
     });
   };
@@ -136,15 +133,6 @@ export function PartnerFormModal({
               </select>
             </div>
           )}
-          {/* 이메일 — 어드민 로그인 계정으로 사용됨 */}
-          <div className="space-y-1">
-            <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">
-              이메일 <span className="text-[#8247e5]">(어드민 로그인 ID)</span>
-            </label>
-            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-              placeholder="partner@example.com"
-              className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50" />
-          </div>
           <div className="grid grid-cols-2 gap-2">
             {type !== "store" && (
               <div className="space-y-1">
@@ -156,7 +144,7 @@ export function PartnerFormModal({
             )}
             <div className="space-y-1">
               <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">연락처</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              <input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })}
                 className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50" />
             </div>
             <div className="space-y-1">
@@ -168,69 +156,10 @@ export function PartnerFormModal({
               </select>
             </div>
           </div>
-          {!item && form.email && (
-            <div className="bg-[#8247e5]/5 border border-[#8247e5]/20 rounded-sm px-3 py-2 font-mono text-[12px] text-[#8247e5]">
-              저장 후 임시 비밀번호가 화면에 표시됩니다. 파트너에게 직접 전달해 주세요.
-            </div>
-          )}
           <button type="submit" className="w-full py-2 bg-[#8247e5] text-white font-mono text-sm uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
             저장
           </button>
         </form>
-      </div>
-    </div>
-  );
-}
-
-// ─── PartnersSection ──────────────────────────────────────────────────────────
-
-// ─── TempPasswordModal ────────────────────────────────────────────────────────
-
-function TempPasswordModal({ email, password, onClose }: { email: string; password: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(password);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-card border border-border rounded-sm p-6 w-[420px] space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-sm bg-[#00d395]/10 flex items-center justify-center">
-            <KeyRound size={15} className="text-[#00d395]" />
-          </div>
-          <span className="font-mono text-[13px] text-foreground uppercase tracking-widest">파트너 계정 생성 완료</span>
-        </div>
-
-        <div className="bg-secondary border border-border rounded-sm px-4 py-3 space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">이메일 (로그인 ID)</span>
-            <span className="font-mono text-[13px] text-foreground">{email}</span>
-          </div>
-          <div className="border-t border-border" />
-          <div className="flex justify-between items-center gap-3">
-            <span className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">임시 비밀번호</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[14px] font-bold text-[#8247e5] tracking-wider">{password}</span>
-              <button onClick={handleCopy} className="text-muted-foreground hover:text-foreground transition-colors">
-                {copied ? <Check size={13} className="text-[#00d395]" /> : <Copy size={13} />}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-[#f59e0b]/5 border border-[#f59e0b]/20 rounded-sm px-3 py-2">
-          <p className="font-mono text-[12px] text-[#f59e0b]">
-            이 비밀번호는 지금만 표시됩니다. 파트너에게 직접 전달해 주세요.
-          </p>
-        </div>
-
-        <button onClick={onClose} className="w-full py-2 bg-[#8247e5] text-white font-mono text-sm uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
-          확인
-        </button>
       </div>
     </div>
   );
@@ -244,7 +173,6 @@ export function PartnersSection() {
   const [allPartners, setAllPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<{ open: boolean; item: Partner | null }>({ open: false, item: null });
-  const [tempPwModal, setTempPwModal] = useState<{ email: string; password: string } | null>(null);
 
   const fetchPartners = useCallback(async () => {
     setLoading(true);
@@ -267,23 +195,18 @@ export function PartnersSection() {
   const handleSave = async (p: Partner) => {
     try {
       if (p.id.startsWith("new_")) {
-        const result = await api("/partners", {
+        await api("/partners", {
           method: "POST",
-          body: JSON.stringify({ name: p.name, code: p.code, type: p.type, parent_id: p.parent_id || null, fee_rate: p.fee_rate, status: p.status, phone: p.phone, email: p.email }),
+          body: JSON.stringify({ name: p.name, code: p.code, type: p.type, parent_id: p.parent_id || null, fee_rate: p.fee_rate, status: p.status, contact: p.contact }),
         });
-        setModal({ open: false, item: null });
-        fetchPartners();
-        if (result?.temp_password && p.email) {
-          setTempPwModal({ email: p.email, password: result.temp_password });
-        }
       } else {
         await api(`/partners/${p.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: p.name, code: p.code, parent_id: p.parent_id || null, fee_rate: p.fee_rate, status: p.status, phone: p.phone, email: p.email }),
+          body: JSON.stringify({ name: p.name, code: p.code, parent_id: p.parent_id || null, fee_rate: p.fee_rate, status: p.status, contact: p.contact }),
         });
-        setModal({ open: false, item: null });
-        fetchPartners();
       }
+      setModal({ open: false, item: null });
+      fetchPartners();
     } catch (err: any) { alert(err.message ?? "저장 실패"); }
   };
 
@@ -380,7 +303,7 @@ export function PartnersSection() {
                   </td>
                 )}
                 {tab !== "store" && <td className="px-4 py-3 font-mono text-sm text-foreground">{p.sub_count}개</td>}
-                <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{p.phone ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{p.contact}</td>
                 <td className="px-4 py-3">
                   <Badge variant={p.status === "active" ? "green" : "gray"}>{p.status === "active" ? "활성" : "비활성"}</Badge>
                 </td>
@@ -393,14 +316,6 @@ export function PartnersSection() {
           </tbody>
         </table>
       </div>
-      )}
-
-      {tempPwModal && (
-        <TempPasswordModal
-          email={tempPwModal.email}
-          password={tempPwModal.password}
-          onClose={() => setTempPwModal(null)}
-        />
       )}
 
       {modal.open && (
