@@ -95,7 +95,7 @@ function PageHeader({ title, onBack }: { title: string; onBack: () => void }) {
 
 // ─── Auth Screen ─────────────────────────────────────────────────────────────
 
-function AuthScreen({ onAuth }: { onAuth: () => void }) {
+function AuthScreen({ onAuth, initialError }: { onAuth: () => void; initialError?: string | null }) {
   const [tab, setTab] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -103,7 +103,7 @@ function AuthScreen({ onAuth }: { onAuth: () => void }) {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError ?? "");
   const [success, setSuccess] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -132,9 +132,13 @@ function AuthScreen({ onAuth }: { onAuth: () => void }) {
     setError("");
     setGoogleLoading(true);
     try {
+      const redirectTo = `${window.location.origin}${window.location.pathname}`;
       const { error: err } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin },
+        options: {
+          redirectTo,
+          queryParams: { access_type: "offline", prompt: "consent" },
+        },
       });
       if (err) throw err;
     } catch (err: any) {
@@ -1754,8 +1758,22 @@ export default function UserApp() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [historyRefresh, setHistoryRefresh] = useState(0);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   useEffect(() => {
+    // OAuth 콜백 에러 파라미터 처리
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get("error_code");
+    const errorDesc = params.get("error_description");
+    if (errorCode || errorDesc) {
+      const msg = errorCode === "bad_oauth_state"
+        ? "Google 로그인 세션이 만료되었습니다. 다시 시도해주세요."
+        : (errorDesc?.replace(/\+/g, " ") ?? "Google 로그인 중 오류가 발생했습니다.");
+      setOauthError(msg);
+      // URL 파라미터 제거
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       if (data.session?.user?.email) { setAuthed(true); setUserEmail(data.session.user.email); }
       setCheckingAuth(false);
@@ -1786,7 +1804,7 @@ export default function UserApp() {
   const goBack = () => setActiveTab("home");
 
   if (checkingAuth) return <div className="min-h-screen bg-background flex items-center justify-center"><Spinner size={20} /></div>;
-  if (!authed) return <AuthScreen onAuth={() => setAuthed(true)} />;
+  if (!authed) return <AuthScreen onAuth={() => setAuthed(true)} initialError={oauthError} />;
 
   const BOTTOM_TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "home",          label: "홈",    icon: Home },
