@@ -3,7 +3,7 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const app = new Hono().basePath("/server");
+const app = new Hono().basePath("/functions/v1/server");
 
 app.use("*", logger(console.log));
 app.use(
@@ -247,7 +247,7 @@ app.post("/partners", async (c) => {
     parent_id:  body.parent_id || null,
     fee_rate:   body.fee_rate ?? 0,
     status:     body.status ?? "active",
-    phone:      body.contact ?? body.phone ?? null,
+    phone:      body.phone ?? body.contact ?? null,
     email:      body.email ?? null,
     address:    body.address ?? null,
     region:     body.region ?? null,
@@ -256,7 +256,24 @@ app.post("/partners", async (c) => {
     bank_holder:  body.bank_holder ?? null,
   }).select().single();
   if (error) return c.json({ error: error.message }, 500);
-  return c.json(data, 201);
+
+  // 이메일이 있으면 Supabase Auth 계정도 생성 (어드민 로그인 용)
+  let tempPassword: string | null = null;
+  if (body.email) {
+    tempPassword = Math.random().toString(36).slice(2, 10) + "A1!";
+    const { error: authErr } = await sb.auth.admin.createUser({
+      email: body.email,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: { partner_id: data.id, partner_type: body.type, partner_name: body.name },
+    });
+    if (authErr && !authErr.message.includes("already registered")) {
+      console.error("Auth user creation failed:", authErr.message);
+      tempPassword = null;
+    }
+  }
+
+  return c.json({ ...data, temp_password: tempPassword }, 201);
 });
 
 app.patch("/partners/:id", async (c) => {
