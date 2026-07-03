@@ -150,7 +150,7 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, accessToken: string
         <div className="mt-6 flex items-center justify-center gap-4">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-[#00d395]" />
-            <span className="font-mono text-[13px] text-muted-foreground">Supabase Connected</span>
+            <span className="font-mono text-[13px] text-muted-foreground">Live</span>
           </div>
           <div className="w-px h-3 bg-border" />
           <span className="font-mono text-[13px] text-muted-foreground">v1.0.0</span>
@@ -478,7 +478,7 @@ export default function AdminApp() {
         </div>
         <div className="flex items-center gap-3">
           <StatusDot status="online" />
-          <span className="font-mono text-[13px] text-[#00d395]">Supabase Connected</span>
+          <span className="font-mono text-[13px] text-[#00d395]">Live</span>
           <div className="h-4 w-px bg-border" />
           <span
             className="font-mono text-[11px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-sm border"

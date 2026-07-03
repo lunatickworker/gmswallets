@@ -26,6 +26,12 @@ function fmtUsd(n: number | null | undefined) {
   return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const KRW_RATE = 1380;
+function fmtKrw(n: number | null | undefined) {
+  if (n == null) return "—";
+  return `₩${Math.round(Number(n) * KRW_RATE).toLocaleString("ko-KR")}`;
+}
+
 function dayKey(date: Date) {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
@@ -40,25 +46,26 @@ function buildDayRange(days: number): string[] {
 // ─── Mini KPI card ────────────────────────────────────────────────────────────
 
 function KpiCard({
-  icon: Icon, label, value, sub, accent = "#8247e5", delta, deltaUp,
+  icon: Icon, label, value, sub, accent = "#8247e5", delta, deltaUp, secondaryValue,
 }: {
   icon: React.ElementType; label: string; value: string; sub?: string;
-  accent?: string; delta?: string; deltaUp?: boolean;
+  accent?: string; delta?: string; deltaUp?: boolean; secondaryValue?: string;
 }) {
   return (
     <div className="bg-card border border-border rounded-sm p-4 flex flex-col gap-2 hover:border-[#8247e5]/25 transition-colors">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-widest">{label}</span>
-        <Icon size={13} style={{ color: accent }} />
+        <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{label}</span>
+        <Icon size={15} style={{ color: accent }} />
       </div>
-      <div className="font-['Barlow_Condensed'] text-[28px] font-bold leading-none" style={{ color: accent }}>{value}</div>
+      <div className="font-['Barlow_Condensed'] text-[34px] font-bold leading-none" style={{ color: accent }}>{value}</div>
+      {secondaryValue && <div className="font-mono text-[12px] text-muted-foreground/70">{secondaryValue}</div>}
       {delta && (
-        <div className={`flex items-center gap-1 font-mono text-[12px] ${deltaUp ? "text-[#00d395]" : "text-[#ef4444]"}`}>
-          {deltaUp ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+        <div className={`flex items-center gap-1 font-mono text-[13px] ${deltaUp ? "text-[#00d395]" : "text-[#ef4444]"}`}>
+          {deltaUp ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
           {delta}
         </div>
       )}
-      {sub && !delta && <div className="font-mono text-[12px] text-muted-foreground">{sub}</div>}
+      {sub && !delta && <div className="font-mono text-[13px] text-muted-foreground">{sub}</div>}
     </div>
   );
 }
@@ -66,8 +73,8 @@ function KpiCard({
 function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="flex items-center gap-3 mb-3">
-      <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-widest">{title}</span>
-      {sub && <><div className="h-px flex-1 bg-border/40" /><span className="font-mono text-[11px] text-muted-foreground/60">{sub}</span></>}
+      <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{title}</span>
+      {sub && <><div className="h-px flex-1 bg-border/40" /><span className="font-mono text-[12px] text-muted-foreground/60">{sub}</span></>}
       {!sub && <div className="h-px flex-1 bg-border/40" />}
     </div>
   );
@@ -126,7 +133,7 @@ async function fetchApiHourChart() {
 // ─── System Admin Dashboard ───────────────────────────────────────────────────
 
 function SystemAdminDashboard({ stats, loading }: { stats: any; loading: boolean }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [partners, setPartners] = useState<any[]>([]);
   const [pendingWallets, setPendingWallets] = useState(0);
   const [activeWallets, setActiveWallets] = useState<number | null>(null);
@@ -221,9 +228,7 @@ function SystemAdminDashboard({ stats, loading }: { stats: any; loading: boolean
       {/* Status banner */}
       <div className="flex items-center gap-3 bg-[#00d395]/5 border border-[#00d395]/20 rounded-sm px-4 py-2.5">
         <StatusDot status="online" />
-        <span className="font-mono text-[13px] text-[#00d395]">LIVE · Supabase Connected</span>
-        <div className="h-3 w-px bg-border" />
-        <span className="font-mono text-[13px] text-muted-foreground">Project: {projectId}</span>
+        <span className="font-mono text-[13px] text-[#00d395]">LIVE</span>
         <div className="flex-1" />
         <span className="font-mono text-[12px] text-muted-foreground">Refreshed {new Date().toLocaleTimeString("ko-KR")}</span>
       </div>
@@ -250,10 +255,10 @@ function SystemAdminDashboard({ stats, loading }: { stats: any; loading: boolean
       <div>
         <SectionHeader title={t("dash_deposit_fee")} />
         <div className="grid grid-cols-4 gap-3">
-          <KpiCard icon={DollarSign} label={t("dash_daily_vol")} value={loading ? "…" : fmtUsd(vol24)} sub="24h USDC" accent="#00d395" />
-          <KpiCard icon={CircleDollarSign} label={t("dash_daily_fee")} value={loading ? "…" : fmtUsd(fee24)} sub={t("dash_system_fee")} accent="#00d395" />
-          <KpiCard icon={TrendingUp} label={t("dash_monthly_vol")} value={infoLoading ? "…" : fmtUsd(volMonth)} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
-          <KpiCard icon={TrendingUp} label={t("dash_monthly_fee")} value={infoLoading ? "…" : fmtUsd(feeMonth)} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
+          <KpiCard icon={DollarSign} label={t("dash_daily_vol")} value={loading ? "…" : (lang === "ko" ? fmtKrw(vol24) : fmtUsd(vol24))} secondaryValue={loading ? undefined : (lang === "ko" ? fmtUsd(vol24) : fmtKrw(vol24))} sub="24h USDC" accent="#00d395" />
+          <KpiCard icon={CircleDollarSign} label={t("dash_daily_fee")} value={loading ? "…" : (lang === "ko" ? fmtKrw(fee24) : fmtUsd(fee24))} secondaryValue={loading ? undefined : (lang === "ko" ? fmtUsd(fee24) : fmtKrw(fee24))} sub={t("dash_system_fee")} accent="#00d395" />
+          <KpiCard icon={TrendingUp} label={t("dash_monthly_vol")} value={infoLoading ? "…" : (lang === "ko" ? fmtKrw(volMonth) : fmtUsd(volMonth))} secondaryValue={infoLoading ? undefined : (lang === "ko" ? fmtUsd(volMonth) : fmtKrw(volMonth))} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
+          <KpiCard icon={TrendingUp} label={t("dash_monthly_fee")} value={infoLoading ? "…" : (lang === "ko" ? fmtKrw(feeMonth) : fmtUsd(feeMonth))} secondaryValue={infoLoading ? undefined : (lang === "ko" ? fmtUsd(feeMonth) : fmtKrw(feeMonth))} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
         </div>
       </div>
 
@@ -427,7 +432,7 @@ function PartnerDashboard({
   const [newUsersYesterday, setNewUsersYesterday] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const ROLE_KO: Record<string, string> = { master: t("role_master"), distributor: t("role_distributor"), store: t("role_store") };
   const roleLabel = ROLE_KO[role] ?? role;
 
@@ -542,9 +547,9 @@ function PartnerDashboard({
       <div>
         <SectionHeader title={t("dash_fee_finance")} />
         <div className="grid grid-cols-4 gap-3">
-          <KpiCard icon={CircleDollarSign} label={t("dash_my_fee_daily")} value={loading ? "…" : fmtUsd(fee24)} sub={`${t("dash_fee_rate_label")} ${(feeRate * 100).toFixed(1)}%`} accent="#00d395" />
-          <KpiCard icon={TrendingUp} label={t("dash_my_fee_monthly")} value={loading ? "…" : fmtUsd(feeMonthCalc)} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
-          <KpiCard icon={DollarSign} label={t("dash_org_vol_monthly")} value={loading ? "…" : fmtUsd(volMonth)} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#00d395" />
+          <KpiCard icon={CircleDollarSign} label={t("dash_my_fee_daily")} value={loading ? "…" : (lang === "ko" ? fmtKrw(fee24) : fmtUsd(fee24))} secondaryValue={loading ? undefined : (lang === "ko" ? fmtUsd(fee24) : fmtKrw(fee24))} sub={`${t("dash_fee_rate_label")} ${(feeRate * 100).toFixed(1)}%`} accent="#00d395" />
+          <KpiCard icon={TrendingUp} label={t("dash_my_fee_monthly")} value={loading ? "…" : (lang === "ko" ? fmtKrw(feeMonthCalc) : fmtUsd(feeMonthCalc))} secondaryValue={loading ? undefined : (lang === "ko" ? fmtUsd(feeMonthCalc) : fmtKrw(feeMonthCalc))} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#f59e0b" />
+          <KpiCard icon={DollarSign} label={t("dash_org_vol_monthly")} value={loading ? "…" : (lang === "ko" ? fmtKrw(volMonth) : fmtUsd(volMonth))} secondaryValue={loading ? undefined : (lang === "ko" ? fmtUsd(volMonth) : fmtKrw(volMonth))} sub={`${new Date().getMonth() + 1} ${t("dash_month_accum")}`} accent="#00d395" />
           <KpiCard icon={Activity} label={t("dash_processed_tx")} value={loading || !stats ? "…" : fmt(stats.totalTx)} sub={t("dash_overall_basis")} accent="#8247e5" />
         </div>
       </div>
