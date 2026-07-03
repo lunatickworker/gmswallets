@@ -1,28 +1,353 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Globe, Lock, Zap, AlertTriangle, ToggleLeft, ToggleRight, RefreshCw, Clock } from "lucide-react";
+import { Globe, Lock, Zap, AlertTriangle, ToggleLeft, ToggleRight, RefreshCw } from "lucide-react";
 import { Badge, StatusDot, Spinner, StatCard, METHOD_COLORS, api } from "./shared";
+import { supabase } from "../../lib/supabase";
+import { useI18n } from "../../lib/i18n";
+
+// ─── Uptime history (localStorage) ───────────────────────────────────────────
+
+const UPTIME_KEY = "gms_svc_uptime_v2";
+const MAX_HISTORY = 120; // ~1h at 30s interval
+
+function loadHistory(): Record<string, boolean[]> {
+  try { return JSON.parse(localStorage.getItem(UPTIME_KEY) ?? "{}"); }
+  catch { return {}; }
+}
+
+function saveHistory(h: Record<string, boolean[]>) {
+  try { localStorage.setItem(UPTIME_KEY, JSON.stringify(h)); } catch {}
+}
+
+function calcUptime(history: boolean[]): number {
+  if (!history.length) return 100;
+  return parseFloat(((history.filter(Boolean).length / history.length) * 100).toFixed(2));
+}
+
+function pushHistory(h: Record<string, boolean[]>, name: string, ok: boolean) {
+  const arr = [...(h[name] ?? []), ok].slice(-MAX_HISTORY);
+  return { ...h, [name]: arr };
+}
+
+// ─── Service check functions ──────────────────────────────────────────────────
+
+async function timed<T>(fn: () => Promise<T>): Promise<{ result: T | null; latency: number; ok: boolean }> {
+  const start = performance.now();
+  try {
+    const result = await fn();
+    return { result, latency: Math.round(performance.now() - start), ok: true };
+  } catch {
+    return { result: null, latency: Math.round(performance.now() - start), ok: false };
+  }
+}
+
+async function checkEdgeAPI(): Promise<{ latency: number; ok: boolean }> {
+  const { latency, ok } = await timed(() => api("/health"));
+  return { latency, ok };
+}
+
+async function checkTransak(): Promise<{ latency: number; ok: boolean }> {
+  const { latency, ok } = await timed(() =>
+    fetch("https://api.transak.com/api/v2/currencies/crypto-currencies", {
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })
+  );
+  return { latency, ok };
+}
+
+async function checkSupabase(): Promise<{ latency: number; ok: boolean }> {
+  const { latency, ok } = await timed(async () => {
+    const { error } = await supabase.from("feature_flags").select("id").limit(1);
+    if (error) throw error;
+  });
+  return { latency, ok };
+}
+
+async function checkCoinGecko(): Promise<{ latency: number; ok: boolean }> {
+  const { latency, ok } = await timed(() =>
+    fetch("https://api.coingecko.com/api/v3/ping", {
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })
+  );
+  return { latency, ok };
+}
+
+// ─── Service definitions ──────────────────────────────────────────────────────
+
+interface ServiceDef {
+  name: string;
+  host: string;
+  region: string;
+  checker: "edge" | "supabase" | "coingecko" | "transak";
+}
+
+const SERVICE_DEFS: ServiceDef[] = [
+  { name: "Edge API",      host: "supabase.co/functions/v1/server", region: "AP-Northeast", checker: "edge" },
+  { name: "Supabase DB",   host: "*.supabase.co",                   region: "AP-Northeast", checker: "supabase" },
+  { name: "CoinGecko API", host: "api.coingecko.com",               region: "Global",       checker: "coingecko" },
+  { name: "Transak",       host: "api.transak.com",                 region: "Global",       checker: "transak" },
+];
+
+interface ServiceState {
+  name: string;
+  host: string;
+  region: string;
+  latency: number;
+  uptime: number;
+  status: "online" | "degraded" | "offline" | "checking";
+}
+
+function deriveStatus(latency: number, ok: boolean, uptime: number): "online" | "degraded" | "offline" {
+  if (!ok) return uptime < 95 ? "offline" : "degraded";
+  if (latency > 500 || uptime < 99) return "degraded";
+  return "online";
+}
+
+// ─── Services Section ─────────────────────────────────────────────────────────
+
+export function ServicesSection() {
+  const [services, setServices] = useState<ServiceState[]>(
+    SERVICE_DEFS.map((s) => ({ name: s.name, host: s.host, region: s.region, latency: 0, uptime: 100, status: "checking" as const }))
+  );
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [checking, setChecking] = useState(false);
+  const historyRef = useRef<Record<string, boolean[]>>(loadHistory());
+
+  const runChecks = useCallback(async () => {
+    setChecking(true);
+
+    const [edgeResult, supaResult, geckoResult, transakResult] = await Promise.all([
+      checkEdgeAPI(),
+      checkSupabase(),
+      checkCoinGecko(),
+      checkTransak(),
+    ]);
+
+    const results: Record<string, { latency: number; ok: boolean }> = {
+      "Edge API":      edgeResult,
+      "Supabase DB":   supaResult,
+      "CoinGecko API": geckoResult,
+      "Transak":       transakResult,
+    };
+
+    let h = historyRef.current;
+    for (const [name, r] of Object.entries(results)) {
+      h = pushHistory(h, name, r.ok);
+    }
+    historyRef.current = h;
+    saveHistory(h);
+
+    setServices(SERVICE_DEFS.map((def) => {
+      const r = results[def.name];
+      const history = h[def.name] ?? [];
+      const uptime = calcUptime(history);
+      if (!r) return { name: def.name, host: def.host, region: def.region, latency: 0, uptime: 100, status: "checking" as const };
+      return { name: def.name, host: def.host, region: def.region, latency: r.latency, uptime, status: deriveStatus(r.latency, r.ok, uptime) };
+    }));
+
+    setLastChecked(new Date());
+    setChecking(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    runChecks();
+    const id = setInterval(runChecks, 30_000);
+    return () => clearInterval(id);
+  }, [runChecks]);
+
+  const online = services.filter((s) => s.status === "online").length;
+  const degraded = services.filter((s) => s.status === "degraded" || s.status === "offline").length;
+  const avgUptime = services.length
+    ? parseFloat((services.reduce((a, s) => a + s.uptime, 0) / services.length).toFixed(2))
+    : 100;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {checking && <div className="w-3 h-3 border border-[#8247e5]/40 border-t-[#8247e5] rounded-full animate-spin" />}
+          {lastChecked && (
+            <span className="font-mono text-[13px] text-muted-foreground">
+              Last check: {lastChecked.toLocaleTimeString(undefined, { hour12: false })}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={runChecks}
+          disabled={checking}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={checking ? "animate-spin" : ""} /> Recheck
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label="Services Online" value={`${online} / ${services.length}`} accent="#00d395" />
+        <StatCard label="Degraded" value={String(degraded)} accent="#f59e0b" />
+        <StatCard label="Avg Uptime (rolling)" value={`${avgUptime}%`} accent="#8247e5" />
+      </div>
+
+      <div className="space-y-2">
+        {services.map((svc) => (
+          <div
+            key={svc.name}
+            className={`bg-card border rounded-sm p-4 flex items-center gap-4 hover:bg-secondary/20 transition-colors ${
+              svc.status === "degraded" ? "border-[#f59e0b]/30" :
+              svc.status === "offline"  ? "border-[#ef4444]/30" : "border-border"
+            }`}
+          >
+            {svc.status === "checking"
+              ? <div className="w-2 h-2 border border-[#6b7280]/40 border-t-[#6b7280] rounded-full animate-spin shrink-0" />
+              : <StatusDot status={svc.status === "offline" ? "offline" : svc.status} />
+            }
+            <div className="w-44 shrink-0">
+              <div className="font-['Barlow'] text-sm font-semibold text-foreground">{svc.name}</div>
+              <div className="font-mono text-[13px] text-muted-foreground mt-0.5">{svc.host}</div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Globe size={10} className="text-muted-foreground" />
+              <span className="font-mono text-[13px] text-muted-foreground">{svc.region}</span>
+            </div>
+            <div className="flex-1" />
+            <div className="text-right">
+              <div className={`font-mono text-sm ${
+                svc.status === "checking" ? "text-muted-foreground" :
+                svc.latency > 500 ? "text-[#ef4444]" :
+                svc.latency > 200 ? "text-[#f59e0b]" : "text-foreground"
+              }`}>
+                {svc.status === "checking" ? "…" : `${svc.latency}ms`}
+              </div>
+              <div className="font-mono text-[13px] text-muted-foreground">avg latency</div>
+            </div>
+            <div className="text-right w-20">
+              <div className={`font-['Barlow_Condensed'] text-xl font-bold ${
+                svc.uptime >= 99.9 ? "text-[#00d395]" :
+                svc.uptime >= 99   ? "text-[#f59e0b]" : "text-[#ef4444]"
+              }`}>
+                {svc.status === "checking" ? "—" : `${svc.uptime}%`}
+              </div>
+              <div className="font-mono text-[13px] text-muted-foreground">uptime</div>
+            </div>
+            <Badge variant={
+              svc.status === "online"   ? "green" :
+              svc.status === "offline"  ? "red"   :
+              svc.status === "checking" ? "gray"  : "yellow"
+            }>
+              {svc.status}
+            </Badge>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  );
+}
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-const ROUTES = [
-  { method: "POST", path: "/auth/register", latency: 88, rps: 2.1, errorRate: 0.0, status: "healthy", auth: false, cache: false },
-  { method: "POST", path: "/auth/login", latency: 112, rps: 5.4, errorRate: 0.2, status: "healthy", auth: false, cache: false },
-  { method: "GET",  path: "/wallet/balance", latency: 194, rps: 32.5, errorRate: 0.5, status: "degraded", auth: true, cache: true },
-  { method: "GET",  path: "/wallet/price", latency: 61, rps: 88.2, errorRate: 0.0, status: "healthy", auth: true, cache: true },
-  { method: "GET",  path: "/transactions", latency: 128, rps: 14.3, errorRate: 0.0, status: "healthy", auth: true, cache: false },
-  { method: "POST", path: "/webhooks/transak", latency: 56, rps: 0.3, errorRate: 0.0, status: "healthy", auth: false, cache: false },
-  { method: "GET",  path: "/users/me", latency: 72, rps: 41.8, errorRate: 0.0, status: "healthy", auth: true, cache: false },
-  { method: "PATCH",path: "/users/me", latency: 95, rps: 3.2, errorRate: 0.0, status: "healthy", auth: true, cache: false },
+const STATIC_ROUTES = [
+  { method: "POST", path: "/auth/register", auth: false, cache: false },
+  { method: "POST", path: "/auth/login",    auth: false, cache: false },
+  { method: "GET",  path: "/wallet/balance", auth: true,  cache: true  },
+  { method: "GET",  path: "/wallet/price",   auth: true,  cache: true  },
+  { method: "GET",  path: "/transactions",   auth: true,  cache: false },
+  { method: "POST", path: "/webhooks/transak", auth: false, cache: false },
+  { method: "GET",  path: "/users/me",       auth: true,  cache: false },
+  { method: "PATCH",path: "/users/me",       auth: true,  cache: false },
 ];
 
+interface RouteState {
+  method: string; path: string; auth: boolean; cache: boolean;
+  latency: number | null; rps: number | null; errorRate: number | null;
+  status: "healthy" | "degraded" | "unknown";
+}
+
 export function RoutesSection() {
+  const [routes, setRoutes] = useState<RouteState[]>(
+    STATIC_ROUTES.map((r) => ({ ...r, latency: null, rps: null, errorRate: null, status: "unknown" as const }))
+  );
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [backendSupported, setBackendSupported] = useState<boolean | null>(null);
+
+  const runChecks = useCallback(async () => {
+    setChecking(true);
+    try {
+      const backendRoutes = await api("/health/routes");
+      setBackendSupported(true);
+
+      if (Array.isArray(backendRoutes) && backendRoutes.length > 0) {
+        setRoutes(STATIC_ROUTES.map((r) => {
+          const br = backendRoutes.find((x: any) => x.path === r.path && x.method === r.method);
+          if (!br) return { ...r, latency: null, rps: null, errorRate: null, status: "unknown" as const };
+          const status: "healthy" | "degraded" | "unknown" = br.errorRate > 0.5 || br.latency > 400 ? "degraded" : "healthy";
+          return { ...r, latency: br.latency, rps: br.rps ?? null, errorRate: br.errorRate ?? 0, status };
+        }));
+      } else {
+        // Backend alive but no traffic yet — leave status as "unknown"
+        setRoutes(STATIC_ROUTES.map((r) => ({ ...r, latency: null, rps: null, errorRate: null, status: "unknown" as const })));
+      }
+    } catch {
+      setBackendSupported(false);
+      setRoutes(STATIC_ROUTES.map((r) => ({ ...r, latency: null, rps: null, errorRate: null, status: "unknown" as const })));
+    }
+
+    setLastChecked(new Date());
+    setChecking(false);
+  }, []);
+
+  useEffect(() => {
+    runChecks();
+    const id = setInterval(runChecks, 60_000);
+    return () => clearInterval(id);
+  }, [runChecks]);
+
+  const healthy = routes.filter((r) => r.status === "healthy").length;
+  const degraded = routes.filter((r) => r.status === "degraded").length;
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Total Routes" value={String(ROUTES.length)} />
-        <StatCard label="Healthy" value={String(ROUTES.filter((r) => r.status === "healthy").length)} accent="#00d395" />
-        <StatCard label="Degraded" value={String(ROUTES.filter((r) => r.status === "degraded").length)} accent="#f59e0b" />
+      {backendSupported === false && (
+        <div className="flex items-center gap-3 bg-[#f59e0b]/5 border border-[#f59e0b]/20 rounded-sm px-4 py-2.5">
+          <AlertTriangle size={12} className="text-[#f59e0b]" />
+          <span className="font-mono text-[13px] text-[#f59e0b]">
+            Cannot connect to backend. Check if Edge Function is deployed.
+          </span>
+        </div>
+      )}
+      {backendSupported === true && routes.every((r) => r.status === "unknown") && (
+        <div className="flex items-center gap-3 bg-secondary/50 border border-border rounded-sm px-4 py-2.5">
+          <span className="font-mono text-[13px] text-muted-foreground">
+            No traffic data yet. Will update automatically when API requests occur.
+          </span>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {checking && <div className="w-3 h-3 border border-[#8247e5]/40 border-t-[#8247e5] rounded-full animate-spin" />}
+          {lastChecked && (
+            <span className="font-mono text-[13px] text-muted-foreground">
+              Last measured: {lastChecked.toLocaleTimeString(undefined, { hour12: false })}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={runChecks}
+          disabled={checking}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={checking ? "animate-spin" : ""} /> Recheck
+        </button>
       </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label="Total Routes" value={String(routes.length)} />
+        <StatCard label="Healthy" value={String(healthy)} accent="#00d395" />
+        <StatCard label="Degraded" value={String(degraded)} accent="#f59e0b" />
+      </div>
+
       <div className="bg-card border border-border rounded-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">API Route Health</span>
@@ -36,71 +361,37 @@ export function RoutesSection() {
             </tr>
           </thead>
           <tbody>
-            {ROUTES.map((r, i) => (
-              <tr key={r.method + r.path} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === ROUTES.length - 1 ? "border-0" : ""}`}>
+            {routes.map((r, i) => (
+              <tr key={r.method + r.path} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === routes.length - 1 ? "border-0" : ""}`}>
                 <td className="px-4 py-2.5"><span className={`font-mono text-sm font-bold ${METHOD_COLORS[r.method]}`}>{r.method}</span></td>
                 <td className="px-4 py-2.5 font-mono text-sm text-foreground">{r.path}</td>
-                <td className="px-4 py-2.5"><span className={`font-mono text-sm ${r.latency > 250 ? "text-[#f59e0b]" : "text-[#00d395]"}`}>{r.latency}ms</span></td>
-                <td className="px-4 py-2.5 font-mono text-sm text-muted-foreground">{r.rps}</td>
-                <td className="px-4 py-2.5"><span className={`font-mono text-sm ${r.errorRate > 0.5 ? "text-[#ef4444]" : r.errorRate > 0 ? "text-[#f59e0b]" : "text-muted-foreground"}`}>{r.errorRate.toFixed(1)}%</span></td>
+                <td className="px-4 py-2.5">
+                  {r.latency == null
+                    ? <span className="font-mono text-sm text-muted-foreground">…</span>
+                    : <span className={`font-mono text-sm ${r.latency > 400 ? "text-[#ef4444]" : r.latency > 200 ? "text-[#f59e0b]" : "text-[#00d395]"}`}>{r.latency}ms</span>
+                  }
+                </td>
+                <td className="px-4 py-2.5 font-mono text-sm text-muted-foreground">{r.rps ?? "—"}</td>
+                <td className="px-4 py-2.5">
+                  {r.errorRate == null
+                    ? <span className="font-mono text-sm text-muted-foreground">—</span>
+                    : <span className={`font-mono text-sm ${r.errorRate > 0.5 ? "text-[#ef4444]" : r.errorRate > 0 ? "text-[#f59e0b]" : "text-muted-foreground"}`}>{r.errorRate.toFixed(1)}%</span>
+                  }
+                </td>
                 <td className="px-4 py-2.5">{r.auth ? <Lock size={11} className="text-[#8247e5]" /> : <span className="font-mono text-[13px] text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-2.5">{r.cache ? <Zap size={11} className="text-[#00d395]" /> : <span className="font-mono text-[13px] text-muted-foreground">—</span>}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1.5">
-                    <StatusDot status={r.status as any} />
-                    <span className={`font-mono text-[13px] ${r.status === "healthy" ? "text-[#00d395]" : "text-[#f59e0b]"}`}>{r.status}</span>
+                    {r.status !== "unknown" && <StatusDot status={r.status} />}
+                    <span className={`font-mono text-[13px] ${r.status === "healthy" ? "text-[#00d395]" : r.status === "degraded" ? "text-[#f59e0b]" : "text-muted-foreground"}`}>
+                      {r.status === "unknown" ? "—" : r.status}
+                    </span>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── Services ─────────────────────────────────────────────────────────────────
-
-const SERVICES_LIST = [
-  { name: "NestJS API", host: "api.polygon-wallet.vercel.app", region: "US-East", uptime: 99.97, latency: 94, status: "online" as const },
-  { name: "Supabase DB", host: "dkjhqwe.supabase.co", region: "AP-Northeast", uptime: 99.99, latency: 38, status: "online" as const },
-  { name: "Upstash Redis", host: "redis.upstash.io", region: "AP-Northeast", uptime: 99.95, latency: 12, status: "online" as const },
-  { name: "Upstash QStash", host: "qstash.upstash.io", region: "Global", uptime: 99.98, latency: 21, status: "online" as const },
-  { name: "Alchemy RPC", host: "polygon-mainnet.g.alchemy.com", region: "Global", uptime: 99.9, latency: 187, status: "degraded" as const },
-  { name: "CoinGecko API", host: "api.coingecko.com", region: "Global", uptime: 98.2, latency: 412, status: "degraded" as const },
-  { name: "Firebase FCM", host: "fcm.googleapis.com", region: "Global", uptime: 99.99, latency: 67, status: "online" as const },
-];
-
-export function ServicesSection() {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Services Online" value={`${SERVICES_LIST.filter((s) => s.status === "online").length} / ${SERVICES_LIST.length}`} accent="#00d395" />
-        <StatCard label="Degraded" value={String(SERVICES_LIST.filter((s) => s.status === "degraded").length)} accent="#f59e0b" />
-        <StatCard label="Avg Uptime (7d)" value="99.71%" accent="#8247e5" />
-      </div>
-      <div className="space-y-2">
-        {SERVICES_LIST.map((svc) => (
-          <div key={svc.name} className={`bg-card border rounded-sm p-4 flex items-center gap-4 hover:bg-secondary/20 transition-colors ${svc.status === "degraded" ? "border-[#f59e0b]/30" : "border-border"}`}>
-            <StatusDot status={svc.status} />
-            <div className="w-40 shrink-0">
-              <div className="font-['Barlow'] text-sm font-semibold text-foreground">{svc.name}</div>
-              <div className="font-mono text-[13px] text-muted-foreground mt-0.5">{svc.host}</div>
-            </div>
-            <div className="flex items-center gap-1.5"><Globe size={10} className="text-muted-foreground" /><span className="font-mono text-[13px] text-muted-foreground">{svc.region}</span></div>
-            <div className="flex-1" />
-            <div className="text-right">
-              <div className="font-mono text-sm text-foreground">{svc.latency}ms</div>
-              <div className="font-mono text-[13px] text-muted-foreground">avg latency</div>
-            </div>
-            <div className="text-right w-20">
-              <div className={`font-['Barlow_Condensed'] text-xl font-bold ${svc.uptime >= 99.9 ? "text-[#00d395]" : svc.uptime >= 99 ? "text-[#f59e0b]" : "text-[#ef4444]"}`}>{svc.uptime}%</div>
-              <div className="font-mono text-[13px] text-muted-foreground">uptime</div>
-            </div>
-            <Badge variant={svc.status === "online" ? "green" : "yellow"}>{svc.status}</Badge>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -133,12 +424,12 @@ export function ConfigSection() {
     <div className="space-y-4">
       <div className="flex items-center gap-3 bg-[#f59e0b]/5 border border-[#f59e0b]/20 rounded-sm px-4 py-2.5">
         <AlertTriangle size={12} className="text-[#f59e0b]" />
-        <span className="font-mono text-[14px] text-[#f59e0b]">Feature flag 변경은 Supabase DB에 즉시 저장됩니다. MAINTENANCE_MODE 활성화 시 모든 사용자 접근이 차단됩니다.</span>
+        <span className="font-mono text-[14px] text-[#f59e0b]">Feature flag changes are saved immediately to Supabase DB. Enabling MAINTENANCE_MODE blocks all user access.</span>
       </div>
       {loading ? <Spinner /> : (
         <div className="bg-card border border-border rounded-sm overflow-hidden">
           {flags.length === 0 ? (
-            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">플래그가 없습니다. DB 초기화를 실행하세요.</div>
+            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">No flags. Run DB initialization.</div>
           ) : flags.map((flag, i) => (
             <div key={flag.key} className={`px-4 py-4 flex items-center gap-4 border-b border-border/50 hover:bg-secondary/20 transition-colors ${i === flags.length - 1 ? "border-0" : ""} ${flag.key === "MAINTENANCE_MODE" && flag.enabled ? "bg-[#ef4444]/5 border-[#ef4444]/20" : ""}`}>
               <button onClick={() => toggle(flag.key, flag.enabled)} disabled={saving === flag.key} className="shrink-0 transition-opacity disabled:opacity-50">
@@ -167,8 +458,6 @@ export function ConfigSection() {
 export function LogsSection() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [paused, setPaused] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
 
   const fetchLogs = useCallback(async () => {
     try { const data = await api("/logs"); setLogs(data ?? []); } catch { }
@@ -176,28 +465,10 @@ export function LogsSection() {
 
   useEffect(() => { setLoading(true); fetchLogs().finally(() => setLoading(false)); }, [fetchLogs]);
 
-  useEffect(() => {
-    if (paused) { clearInterval(intervalRef.current); return; }
-    const PATHS = ["/auth/refresh", "/wallet/balance", "/wallet/price", "/users/me", "/transactions"];
-    const METHODS = ["GET", "GET", "GET", "POST"];
-    const STATUS = [200, 200, 200, 200, 401, 502];
-    intervalRef.current = setInterval(async () => {
-      const path = PATHS[Math.floor(Math.random() * PATHS.length)];
-      const method = METHODS[Math.floor(Math.random() * METHODS.length)];
-      const status_code = STATUS[Math.floor(Math.random() * STATUS.length)];
-      const newLog = { method, path, status_code, latency_ms: Math.floor(Math.random() * 420 + 30), ip: `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, user_id: Math.random() > 0.4 ? `u_${Math.random().toString(36).slice(2, 6)}` : null };
-      try { await api("/logs", { method: "POST", body: JSON.stringify(newLog) }); setLogs((prev) => [{ ...newLog, id: Date.now(), created_at: new Date().toISOString() }, ...prev.slice(0, 99)]); } catch { }
-    }, 2000);
-    return () => clearInterval(intervalRef.current);
-  }, [paused]);
-
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2"><StatusDot status={paused ? "degraded" : "online"} /><span className="font-mono text-[14px] text-muted-foreground">{paused ? "PAUSED" : "LIVE → Supabase"}</span></div>
-        <button onClick={() => setPaused((p) => !p)} className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors">
-          {paused ? <><RefreshCw size={11} /> Resume</> : <><Clock size={11} /> Pause</>}
-        </button>
+        <div className="flex items-center gap-2"><StatusDot status="online" /><span className="font-mono text-[14px] text-muted-foreground">LIVE → Supabase</span></div>
         <button onClick={fetchLogs} className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={11} /> Refresh</button>
         <span className="font-mono text-[13px] text-muted-foreground">{logs.length} entries</span>
       </div>
@@ -208,7 +479,7 @@ export function LogsSection() {
           </div>
           <div className="overflow-y-auto" style={{ maxHeight: 480, scrollbarWidth: "none" }}>
             {logs.length === 0 ? (
-              <div className="px-4 py-8 text-center text-muted-foreground">로그 없음 — 자동으로 기록됩니다</div>
+              <div className="px-4 py-8 text-center text-muted-foreground">No logs — recorded automatically</div>
             ) : logs.map((log, i) => (
               <div key={log.id ?? i} className={`grid grid-cols-[110px_52px_200px_52px_60px_140px_100px] px-4 py-1.5 border-b border-border/30 hover:bg-secondary/20 transition-colors ${i === 0 ? "bg-[#8247e5]/5" : ""}`}>
                 <span className="text-muted-foreground">{new Date(log.created_at).toLocaleTimeString("ko-KR", { hour12: false })}</span>

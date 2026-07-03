@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { ToggleLeft, ToggleRight, Plus, X, Edit3, Trash2, Send } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard } from "./shared";
+import { useI18n } from "../../lib/i18n";
 
 export function NoticesSection({ adminEmail }: { adminEmail: string }) {
+  const { t } = useI18n();
   const [notices, setNotices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -42,7 +44,7 @@ export function NoticesSection({ adminEmail }: { adminEmail: string }) {
   };
 
   const del = async (id: string, title: string) => {
-    if (!confirm("삭제하시겠습니까?")) return;
+    if (!confirm(t("con_del_confirm"))) return;
     await supabase.from("notices").delete().eq("id", id);
     await supabase.from("admin_logs").insert({ admin_email: adminEmail, action: "delete_notice", target_type: "notice", target_id: id, detail: { title } });
     fetchNotices();
@@ -53,33 +55,33 @@ export function NoticesSection({ adminEmail }: { adminEmail: string }) {
     fetchNotices();
   };
 
-  const TYPE_LABELS: Record<string, string> = { notice: "공지", popup: "팝업", event: "이벤트", banner: "배너" };
+  const TYPE_LABELS: Record<string, string> = { notice: t("notif_notice"), popup: t("notif_popup"), event: t("notif_event"), banner: t("notif_banner") };
   const TYPE_VARIANTS: Record<string, any> = { notice: "blue", popup: "yellow", event: "green", banner: "purple" };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        {["all", "notice", "popup", "event", "banner"].map((t) => (
-          <button key={t} onClick={() => setTypeFilter(t)}
-            className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${typeFilter === t ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {t === "all" ? "전체" : TYPE_LABELS[t]}
+        {["all", "notice", "popup", "event", "banner"].map((f) => (
+          <button key={f} onClick={() => setTypeFilter(f)}
+            className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${typeFilter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+            {f === "all" ? t("con_all") : TYPE_LABELS[f]}
           </button>
         ))}
         <button onClick={openCreate} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#8247e5] text-white font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
-          <Plus size={11} /> 공지 작성
+          <Plus size={11} /> {t("con_write")}
         </button>
       </div>
 
       {loading ? <Spinner /> : (
         <div className="bg-card border border-border rounded-sm overflow-hidden">
           {notices.length === 0 ? (
-            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">공지 없음</div>
+            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("con_no_notices")}</div>
           ) : notices.map((n, i) => (
             <div key={n.id} className={`flex items-center gap-4 px-4 py-3.5 border-b border-border/50 hover:bg-secondary/20 transition-colors ${i === notices.length - 1 ? "border-0" : ""}`}>
               <Badge variant={TYPE_VARIANTS[n.type]}>{TYPE_LABELS[n.type]}</Badge>
               <div className="flex-1 min-w-0">
                 <div className="font-['Barlow'] text-sm font-semibold text-foreground truncate">{n.title}</div>
-                <div className="font-mono text-[13px] text-muted-foreground">{new Date(n.created_at).toLocaleString("ko-KR")}</div>
+                <div className="font-mono text-[13px] text-muted-foreground">{new Date(n.created_at).toLocaleString()}</div>
               </div>
               <button onClick={() => togglePublish(n)} className="shrink-0">
                 {n.is_published ? <ToggleRight size={22} className="text-[#00d395]" /> : <ToggleLeft size={22} className="text-muted-foreground" />}
@@ -201,7 +203,7 @@ export function PushSection({ adminEmail }: { adminEmail: string }) {
                   <td className="px-4 py-3"><Badge variant={p.target_type === "all" ? "blue" : p.target_type === "scheduled" ? "yellow" : "gray"}>{p.target_type}</Badge></td>
                   <td className="px-4 py-3"><Badge variant={p.status === "sent" ? "green" : p.status === "scheduled" ? "yellow" : "red"}>{p.status}</Badge></td>
                   <td className="px-4 py-3 font-mono text-sm text-foreground">{(p.sent_count ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{p.sent_at ? new Date(p.sent_at).toLocaleString("ko-KR") : p.scheduled_at ? `예약: ${new Date(p.scheduled_at).toLocaleString("ko-KR")}` : "—"}</td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{p.sent_at ? new Date(p.sent_at).toLocaleString() : p.scheduled_at ? `예약: ${new Date(p.scheduled_at).toLocaleString()}` : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -313,7 +315,7 @@ export function SupportSection({ adminEmail }: { adminEmail: string }) {
                 <Badge variant={t.status === "open" ? "yellow" : t.status === "in_progress" ? "blue" : "green"}>{t.status}</Badge>
                 <div className="flex-1 min-w-0">
                   <div className="font-['Barlow'] text-sm font-semibold text-foreground">{t.title}</div>
-                  <div className="font-mono text-[13px] text-muted-foreground">{t.user_email ?? "anonymous"} · {new Date(t.created_at).toLocaleString("ko-KR")}</div>
+                  <div className="font-mono text-[13px] text-muted-foreground">{t.user_email ?? "anonymous"} · {new Date(t.created_at).toLocaleString()}</div>
                   <div className="font-mono text-[14px] text-muted-foreground mt-1 line-clamp-1">{t.content}</div>
                 </div>
                 <Badge variant="gray">{t.category}</Badge>
@@ -361,7 +363,7 @@ export function SupportSection({ adminEmail }: { adminEmail: string }) {
             </div>
             <div className="bg-secondary/40 rounded-sm p-4 mb-4">
               <div className="font-['Barlow'] text-sm font-semibold text-foreground mb-1">{selected.title}</div>
-              <div className="font-mono text-[13px] text-muted-foreground mb-2">{selected.user_email} · {new Date(selected.created_at).toLocaleString("ko-KR")}</div>
+              <div className="font-mono text-[13px] text-muted-foreground mb-2">{selected.user_email} · {new Date(selected.created_at).toLocaleString()}</div>
               <div className="font-mono text-[14px] text-foreground">{selected.content}</div>
             </div>
             <textarea rows={4} placeholder="답변을 입력하세요..." value={reply} onChange={(e) => setReply(e.target.value)}

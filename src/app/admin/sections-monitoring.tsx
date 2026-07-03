@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { Search, Check, Plus, X } from "lucide-react";
 import { Badge, StatusDot, Spinner, StatCard, api } from "./shared";
+import { useI18n } from "../../lib/i18n";
 
 export function BlockchainSection() {
+  const { t } = useI18n();
   const [txHash, setTxHash] = useState("");
   const [txResult, setTxResult] = useState<null | "found" | "not_found">(null);
   const [gasData] = useState([
@@ -72,17 +74,17 @@ export function BlockchainSection() {
       </div>
 
       <div className="bg-card border border-border rounded-sm p-4">
-        <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-3">트랜잭션 조회</div>
+        <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-3">{t("mon_tx_query")}</div>
         <div className="flex gap-2">
           <input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="0x..." className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50" />
           <button onClick={() => setTxResult(txHash.startsWith("0x") ? "found" : "not_found")}
             className="flex items-center gap-1.5 px-4 py-2 bg-[#8247e5] text-white font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
-            <Search size={11} /> 조회
+            <Search size={11} /> {t("mon_search")}
           </button>
         </div>
         {txResult === "found" && (
           <div className="mt-3 bg-[#00d395]/5 border border-[#00d395]/20 rounded-sm p-3 font-mono text-[14px]">
-            <div className="flex items-center gap-2 mb-2"><Check size={11} className="text-[#00d395]" /><span className="text-[#00d395]">트랜잭션 발견</span></div>
+            <div className="flex items-center gap-2 mb-2"><Check size={11} className="text-[#00d395]" /><span className="text-[#00d395]">{t("mon_tx_found")}</span></div>
             <div className="space-y-1 text-muted-foreground">
               <div>Hash: {txHash}</div>
               <div>Block: {Math.floor(Math.random() * 1000000 + 68000000)}</div>
@@ -91,7 +93,7 @@ export function BlockchainSection() {
           </div>
         )}
         {txResult === "not_found" && (
-          <div className="mt-3 bg-[#ef4444]/5 border border-[#ef4444]/20 rounded-sm p-3 font-mono text-[14px] text-[#ef4444]">유효한 트랜잭션 해시를 입력하세요 (0x로 시작)</div>
+          <div className="mt-3 bg-[#ef4444]/5 border border-[#ef4444]/20 rounded-sm p-3 font-mono text-[14px] text-[#ef4444]">{t("mon_tx_invalid")}</div>
         )}
       </div>
     </div>
@@ -99,6 +101,7 @@ export function BlockchainSection() {
 }
 
 export function WebhooksSection() {
+  const { t } = useI18n();
   const [webhooks, setWebhooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -142,7 +145,7 @@ export function WebhooksSection() {
       {loading ? <Spinner /> : (
         <div className="bg-card border border-border rounded-sm overflow-hidden">
           {webhooks.length === 0 ? (
-            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">웹훅 이벤트 없음</div>
+            <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("mon_no_webhooks")}</div>
           ) : webhooks.map((wh, i) => (
             <div key={wh.id} className={`border-b border-border/50 ${i === webhooks.length - 1 ? "border-0" : ""}`}>
               <button className="w-full px-4 py-3 flex items-center gap-3 hover:bg-secondary/30 transition-colors text-left" onClick={() => setExpanded(expanded === wh.id ? null : wh.id)}>
@@ -151,7 +154,7 @@ export function WebhooksSection() {
                 <span className="font-mono text-sm text-foreground">{wh.event}</span>
                 {wh.retries > 0 && <span className="font-mono text-[13px] text-[#f59e0b]">↻ {wh.retries}</span>}
                 <span className="flex-1" />
-                <span className="font-mono text-[13px] text-muted-foreground">{new Date(wh.created_at).toLocaleString("ko-KR")}</span>
+                <span className="font-mono text-[13px] text-muted-foreground">{new Date(wh.created_at).toLocaleString()}</span>
                 <span className="font-mono text-[13px] text-muted-foreground ml-2">{expanded === wh.id ? "▲" : "▼"}</span>
               </button>
               {expanded === wh.id && (

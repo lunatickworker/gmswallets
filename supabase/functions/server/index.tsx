@@ -24,6 +24,28 @@ function getSupabase() {
   );
 }
 
+// Resolve the calling app-user from a Supabase JWT.
+// Returns { authUserId, userId, partnerId } or null if the token is invalid/missing.
+async function resolveAppUser(authHeader: string | undefined) {
+  const token = (authHeader ?? "").replace("Bearer ", "").trim();
+  if (!token) return null;
+
+  const sb = getSupabase();
+  const { data: { user }, error } = await sb.auth.getUser(token);
+  if (error || !user) return null;
+
+  const { data: appUser } = await sb.from("users")
+    .select("id, partner_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  return {
+    authUserId: user.id,
+    userId: appUser?.id ?? null,
+    partnerId: appUser?.partner_id ?? null,
+  };
+}
+
 // Transak API helper
 const TRANSAK_BASE = Deno.env.get("TRANSAK_BASE_URL") ?? "https://staging-api.transak.com";
 const TRANSAK_KEY  = Deno.env.get("TRANSAK_API_KEY") ?? "";
@@ -41,7 +63,77 @@ async function transakFetch(path: string, opts: RequestInit = {}, accessToken?: 
 }
 
 // ─── Health ────────────────────────────────────────────────────────────────────
-app.get("/health", (c) => c.json({ status: "ok" }));
+app.get("/health", async (c) => {
+  const checks: Record<string, { latency: number; ok: boolean; error?: string }> = {};
+
+  // Supabase DB
+  const dbStart = Date.now();
+  try {
+    const sb = getSupabase();
+    const { error } = await sb.from("users").select("id").limit(1);
+    checks.supabase = { latency: Date.now() - dbStart, ok: !error, ...(error ? { error: error.message } : {}) };
+  } catch (e) {
+    checks.supabase = { latency: Date.now() - dbStart, ok: false, error: String(e) };
+  }
+
+  // Transak API
+  const transakStart = Date.now();
+  try {
+    const res = await fetch(`${TRANSAK_BASE}/api/v2/currencies/crypto-currencies`, {
+      headers: { "x-api-key": TRANSAK_KEY },
+      signal: AbortSignal.timeout(3000),
+    });
+    checks.transak = { latency: Date.now() - transakStart, ok: res.ok };
+  } catch (e) {
+    checks.transak = { latency: Date.now() - transakStart, ok: false, error: String(e) };
+  }
+
+  // CoinGecko
+  const geckoStart = Date.now();
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/ping", {
+      signal: AbortSignal.timeout(3000),
+    });
+    checks.coingecko = { latency: Date.now() - geckoStart, ok: res.ok };
+  } catch (e) {
+    checks.coingecko = { latency: Date.now() - geckoStart, ok: false, error: String(e) };
+  }
+
+  const allOk = Object.values(checks).every((v) => v.ok);
+  return c.json({ status: allOk ? "ok" : "degraded", checks }, allOk ? 200 : 503);
+});
+
+// Route latency registry (populated by middleware below)
+const _routeStats: Record<string, { count: number; errors: number; totalMs: number; lastWindow: number }> = {};
+
+app.use("/*", async (c, next) => {
+  const key = `${c.req.method} ${c.req.routePath ?? new URL(c.req.url).pathname}`;
+  const start = Date.now();
+  await next();
+  const ms = Date.now() - start;
+  const isError = c.res.status >= 400;
+  const now = Math.floor(Date.now() / 60000); // 1-min window
+  if (!_routeStats[key] || _routeStats[key].lastWindow !== now) {
+    _routeStats[key] = { count: 0, errors: 0, totalMs: 0, lastWindow: now };
+  }
+  _routeStats[key].count++;
+  _routeStats[key].totalMs += ms;
+  if (isError) _routeStats[key].errors++;
+});
+
+app.get("/health/routes", (c) => {
+  const routes = Object.entries(_routeStats).map(([route, s]) => {
+    const [method, ...pathParts] = route.split(" ");
+    return {
+      method,
+      path: pathParts.join(" "),
+      latency: s.count ? Math.round(s.totalMs / s.count) : 0,
+      rps: +(s.count / 60).toFixed(3),
+      errorRate: s.count ? +(s.errors / s.count).toFixed(3) : 0,
+    };
+  });
+  return c.json(routes);
+});
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 app.post("/setup", async (c) => {
@@ -107,7 +199,16 @@ app.get("/users", async (c) => {
 app.post("/users", async (c) => {
   const sb = getSupabase();
   const body = await c.req.json();
-  const { data, error } = await sb.from("users").insert(body).select().single();
+  // auth_user_id and partner_id are accepted from the app at registration time
+  const { data, error } = await sb.from("users").insert({
+    email:         body.email,
+    wallet_address: body.wallet_address ?? null,
+    status:        body.status ?? "active",
+    kyc_tier:      body.kyc_tier ?? "T0",
+    role:          body.role ?? "user",
+    auth_user_id:  body.auth_user_id ?? null,
+    partner_id:    body.partner_id ?? null,
+  }).select().single();
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data, 201);
 });
@@ -206,6 +307,26 @@ app.get("/admin-logs", async (c) => {
 });
 
 // ─── Partners ─────────────────────────────────────────────────────────────────
+
+// Returns the partner record for the currently logged-in user (via JWT)
+app.get("/partners/me", async (c) => {
+  const sb = getSupabase();
+  const authHeader = c.req.header("Authorization") ?? "";
+  const token = authHeader.replace("Bearer ", "");
+  if (!token) return c.json({ role: "system_admin", partner: null });
+
+  const { data: { user }, error: userError } = await sb.auth.getUser(token);
+  if (userError || !user) return c.json({ role: "system_admin", partner: null });
+
+  const { data: partner } = await sb.from("partners")
+    .select("*")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (!partner) return c.json({ role: "system_admin", partner: null });
+  return c.json({ role: partner.type as string, partner });
+});
+
 app.get("/partners", async (c) => {
   const sb = getSupabase();
   const type   = c.req.query("type") ?? "";
@@ -240,6 +361,20 @@ app.get("/partners", async (c) => {
 app.post("/partners", async (c) => {
   const sb   = getSupabase();
   const body = await c.req.json();
+
+  // Create Supabase Auth user if email + password provided
+  let authUserId: string | null = null;
+  if (body.email && body.password) {
+    const { data: authData, error: authError } = await sb.auth.admin.createUser({
+      email: body.email,
+      password: body.password,
+      email_confirm: true,
+      user_metadata: { name: body.name, partner_code: body.code, partner_type: body.type },
+    });
+    if (authError) return c.json({ error: `Auth 계정 생성 실패: ${authError.message}` }, 500);
+    authUserId = authData.user?.id ?? null;
+  }
+
   const { data, error } = await sb.from("partners").insert({
     name:       body.name,
     code:       body.code,
@@ -254,8 +389,14 @@ app.post("/partners", async (c) => {
     bank_name:  body.bank_name ?? null,
     bank_account: body.bank_account ?? null,
     bank_holder:  body.bank_holder ?? null,
+    auth_user_id: authUserId,
   }).select().single();
-  if (error) return c.json({ error: error.message }, 500);
+
+  if (error) {
+    // Roll back Auth user if DB insert fails
+    if (authUserId) await sb.auth.admin.deleteUser(authUserId);
+    return c.json({ error: error.message }, 500);
+  }
   return c.json(data, 201);
 });
 
@@ -442,6 +583,9 @@ app.post("/transak/order/bank", async (c) => {
   const accessToken = c.req.header("x-transak-token");
   if (!accessToken) return c.json({ error: "x-transak-token header required" }, 401);
 
+  // Identify the calling app-user so we can attribute the transaction
+  const caller = await resolveAppUser(c.req.header("Authorization"));
+
   const body = await c.req.json();
   const { quoteId, walletAddress, paymentInstrumentId } = body;
   if (!quoteId || !walletAddress) return c.json({ error: "quoteId and walletAddress required" }, 400);
@@ -452,11 +596,13 @@ app.post("/transak/order/bank", async (c) => {
   }, accessToken);
   if (!ok) return c.json({ error: data?.message ?? "주문 생성 실패" }, 502);
 
-  // Save transaction to our DB
+  // Save transaction to our DB with user and partner attribution
   if (ok && data?.data?.id) {
     const sb = getSupabase();
     await sb.from("transactions").insert({
       type: "purchase",
+      user_id: caller?.userId ?? null,
+      partner_id: caller?.partnerId ?? null,
       amount: data.data.fiatAmount ?? 0,
       currency: data.data.fiatCurrency ?? "USD",
       status: "pending",
@@ -492,6 +638,222 @@ app.get("/transak/user/limits", async (c) => {
     {}, accessToken,
   );
   if (!ok) return c.json({ error: data?.message ?? "한도 조회 실패" }, 502);
+  return c.json(data);
+});
+
+// ─── Wallet ────────────────────────────────────────────────────────────────────
+
+// GET /wallet/status - 내 지갑 상태 조회 (앱용)
+app.get("/wallet/status", async (c) => {
+  const caller = await resolveAppUser(c.req.header("Authorization"));
+  if (!caller?.userId) return c.json({ error: "unauthorized" }, 401);
+
+  const sb = getSupabase();
+  const { data: user } = await sb.from("users")
+    .select("wallet_status, wallet_approved_at")
+    .eq("id", caller.userId)
+    .single();
+
+  const { data: wallets } = await sb.from("wallets")
+    .select("chain_name, chain_id, network, address, derivation_path, is_primary, created_at")
+    .eq("user_id", caller.userId)
+    .order("is_primary", { ascending: false });
+
+  return c.json({
+    wallet_status: user?.wallet_status ?? "none",
+    wallet_approved_at: user?.wallet_approved_at ?? null,
+    wallets: wallets ?? [],
+  });
+});
+
+// POST /wallet/register - 앱에서 생성한 주소를 서버에 등록 (non-custodial: 주소만 저장)
+// Body: { wallets: [{ chain_name, chain_id, network, address, derivation_path, is_primary }] }
+app.post("/wallet/register", async (c) => {
+  const caller = await resolveAppUser(c.req.header("Authorization"));
+  if (!caller?.userId) return c.json({ error: "unauthorized" }, 401);
+
+  const sb = getSupabase();
+
+  const { data: user } = await sb.from("users")
+    .select("wallet_status")
+    .eq("id", caller.userId)
+    .single();
+
+  if (!user) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
+  if (user.wallet_status === "active") {
+    return c.json({ error: "이미 지갑이 등록되어 있습니다." }, 409);
+  }
+
+  const body = await c.req.json();
+  const entries: any[] = body.wallets ?? [];
+  if (!entries.length) return c.json({ error: "wallets 배열이 필요합니다." }, 400);
+
+  // 필수 필드 검증
+  for (const w of entries) {
+    if (!w.chain_name || !w.address || !w.derivation_path) {
+      return c.json({ error: "chain_name, address, derivation_path 은 필수입니다." }, 400);
+    }
+    // EVM 주소 형식 검증 (0x + 40 hex)
+    if (w.chain_id && !/^0x[0-9a-fA-F]{40}$/.test(w.address)) {
+      return c.json({ error: `유효하지 않은 EVM 주소: ${w.address}` }, 400);
+    }
+  }
+
+  const rows = entries.map((w) => ({
+    user_id:         caller.userId,
+    chain_name:      w.chain_name,
+    chain_id:        w.chain_id ?? null,
+    network:         w.network ?? "mainnet",
+    address:         w.address,
+    derivation_path: w.derivation_path,
+    is_primary:      w.is_primary ?? false,
+  }));
+
+  const { data: inserted, error } = await sb.from("wallets")
+    .upsert(rows, { onConflict: "user_id,chain_name,network" })
+    .select();
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  // 기본 Polygon 주소를 users.wallet_address 에도 동기화 (하위 호환)
+  const primary = entries.find((w) => w.chain_name === "polygon" && w.is_primary) ?? entries[0];
+  await sb.from("users")
+    .update({
+      wallet_status:  "active",
+      wallet_address: primary.address,
+    })
+    .eq("id", caller.userId);
+
+  return c.json({ ok: true, wallets: inserted }, 201);
+});
+
+// ─── Admin: Wallet 승인/취소 ──────────────────────────────────────────────────
+
+// POST /admin/users/:id/wallet/approve - 관리자가 지갑 생성 승인
+app.post("/admin/users/:id/wallet/approve", async (c) => {
+  const adminAuth = c.req.header("Authorization");
+  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
+
+  // 관리자 토큰 검증
+  const sb = getSupabase();
+  const token = adminAuth.replace("Bearer ", "").trim();
+  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
+  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
+
+  const { data: adminRecord } = await sb.from("users")
+    .select("role")
+    .eq("auth_user_id", adminUser.id)
+    .maybeSingle();
+
+  const adminRoles = ["system_admin", "master", "distributor", "store"];
+  if (!adminRecord || !adminRoles.includes(adminRecord.role)) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  const targetUserId = c.req.param("id");
+  const { data: target } = await sb.from("users")
+    .select("wallet_status")
+    .eq("id", targetUserId)
+    .single();
+
+  if (!target) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
+  if (target.wallet_status === "active") return c.json({ error: "이미 지갑이 활성화된 사용자입니다." }, 409);
+
+  const { data, error } = await sb.from("users")
+    .update({
+      wallet_status:      "approved",
+      wallet_approved_at: new Date().toISOString(),
+      wallet_approved_by: adminUser.id,
+    })
+    .eq("id", targetUserId)
+    .select("id, email, wallet_status, wallet_approved_at")
+    .single();
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  // 어드민 액션 로그
+  await sb.from("admin_logs").insert({
+    admin_email: adminUser.email ?? "",
+    action:      "wallet_approve",
+    target_type: "user",
+    target_id:   targetUserId,
+    detail:      { wallet_status: "approved" },
+  }).catch(() => {});
+
+  return c.json({ ok: true, user: data });
+});
+
+// POST /admin/users/:id/wallet/revoke - 관리자가 지갑 승인 취소 (active → none 불가, approved → none만)
+app.post("/admin/users/:id/wallet/revoke", async (c) => {
+  const adminAuth = c.req.header("Authorization");
+  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
+
+  const sb = getSupabase();
+  const token = adminAuth.replace("Bearer ", "").trim();
+  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
+  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
+
+  const { data: adminRecord } = await sb.from("users")
+    .select("role")
+    .eq("auth_user_id", adminUser.id)
+    .maybeSingle();
+
+  if (!adminRecord || !["system_admin", "master"].includes(adminRecord.role)) {
+    return c.json({ error: "forbidden: 시스템 관리자 또는 마스터만 승인 취소 가능" }, 403);
+  }
+
+  const targetUserId = c.req.param("id");
+  const { data: target } = await sb.from("users")
+    .select("wallet_status")
+    .eq("id", targetUserId)
+    .single();
+
+  if (!target) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
+  if (target.wallet_status === "active") {
+    return c.json({ error: "이미 활성화된 지갑은 취소할 수 없습니다." }, 409);
+  }
+
+  const { data, error } = await sb.from("users")
+    .update({ wallet_status: "none", wallet_approved_at: null, wallet_approved_by: null })
+    .eq("id", targetUserId)
+    .select("id, email, wallet_status")
+    .single();
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  await sb.from("admin_logs").insert({
+    admin_email: adminUser.email ?? "",
+    action:      "wallet_revoke",
+    target_type: "user",
+    target_id:   targetUserId,
+    detail:      { wallet_status: "none" },
+  }).catch(() => {});
+
+  return c.json({ ok: true, user: data });
+});
+
+// GET /admin/wallets - 전체 지갑 목록 (어드민용)
+app.get("/admin/wallets", async (c) => {
+  const adminAuth = c.req.header("Authorization");
+  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
+
+  const sb = getSupabase();
+  const token = adminAuth.replace("Bearer ", "").trim();
+  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
+  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
+
+  const search = c.req.query("search") ?? "";
+  const status = c.req.query("wallet_status") ?? "";
+
+  let q = sb.from("users")
+    .select("id, email, wallet_status, wallet_approved_at, wallet_address, wallets(chain_name, chain_id, network, address, derivation_path, is_primary, created_at)")
+    .order("joined_at", { ascending: false });
+
+  if (search) q = q.ilike("email", `%${search}%`);
+  if (status) q = q.eq("wallet_status", status);
+
+  const { data, error } = await q;
+  if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
 });
 

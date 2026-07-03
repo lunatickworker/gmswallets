@@ -1,4 +1,7 @@
 import { useState, useEffect } from "react";
+import adminLoginLogo from "@/imports/gms_admin_login_logo.png";
+import adminHeaderLogo from "@/imports/gms_wallet_admin_logo.png";
+import { ImageWithFallback } from "@/app/components/figma/ImageWithFallback";
 import {
   Activity, Users, Webhook, Route, Settings, Database,
   ChevronRight, AlertTriangle, Check, LogIn, Shield,
@@ -7,7 +10,7 @@ import {
   Globe, Cpu, Radio, Monitor, RefreshCw,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { StatusDot, Spinner, api } from "./admin/shared";
+import { StatusDot, Spinner, api, BASE } from "./admin/shared";
 import { DashboardSection } from "./admin/sections-dashboard";
 import { UsersSection, WalletsSection } from "./admin/sections-users";
 import { PurchasesSection, SwapsSection, TransactionsSection } from "./admin/sections-transactions";
@@ -16,10 +19,12 @@ import { NoticesSection, PushSection, SupportSection } from "./admin/sections-co
 import { PartnersSection, SettlementsSection, FeesSection } from "./admin/sections-partners";
 import { CoinsSection, OpLogsSection, SysConfigSection, TransakSyncSection, TransakOrdersSection } from "./admin/sections-ops";
 import { RoutesSection, ServicesSection, ConfigSection, LogsSection } from "./admin/sections-bff";
+import { useI18n, LanguageSwitcher } from "../lib/i18n";
 
 // ─── Login Gate ───────────────────────────────────────────────────────────────
 
-function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
+function LoginScreen({ onLogin }: { onLogin: (email: string, accessToken: string) => void }) {
+  const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -32,15 +37,14 @@ function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
     try {
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError) throw authError;
-      // Log admin login
       await supabase.from("admin_logs").insert({
         admin_email: data.user?.email ?? email,
         action: "admin_login",
         detail: { timestamp: new Date().toISOString() },
       });
-      onLogin(data.user?.email ?? email);
+      onLogin(data.user?.email ?? email, data.session?.access_token ?? "");
     } catch (err: any) {
-      setError(err.message ?? "로그인 실패");
+      setError(err.message ?? t("error_generic"));
     } finally {
       setLoading(false);
     }
@@ -48,44 +52,33 @@ function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center relative overflow-hidden px-4">
-      {/* Background grid pattern */}
       <div className="absolute inset-0 opacity-[0.04]" style={{
         backgroundImage: "linear-gradient(rgba(130,71,229,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(130,71,229,0.6) 1px, transparent 1px)",
         backgroundSize: "48px 48px",
       }} />
-
-      {/* Glow blobs */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] rounded-full opacity-10 blur-3xl pointer-events-none"
         style={{ background: "radial-gradient(ellipse, #8247e5 0%, transparent 70%)" }} />
       <div className="absolute bottom-1/4 left-1/3 w-[300px] h-[300px] rounded-full opacity-5 blur-3xl pointer-events-none"
         style={{ background: "radial-gradient(ellipse, #00d395 0%, transparent 70%)" }} />
 
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+
       <div className="relative w-full max-w-md">
-        {/* Logo + Title */}
         <div className="flex flex-col items-center mb-10">
-          <div className="w-14 h-14 rounded-xl bg-[#8247e5] flex items-center justify-center mb-5 shadow-2xl shadow-[#8247e5]/40 ring-1 ring-[#8247e5]/30">
-            <Shield size={26} className="text-white" />
-          </div>
-          <h1 className="font-['Barlow_Condensed'] text-3xl font-bold uppercase tracking-widest text-foreground mb-1">
-            Admin Console
-          </h1>
-          <div className="flex items-center gap-2">
-            <div className="h-px w-12 bg-border" />
-            <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">Polygon Wallet · BFF</span>
-            <div className="h-px w-12 bg-border" />
-          </div>
+          <ImageWithFallback src={adminLoginLogo} alt="GMS Wallet Admin Console" className="h-48 w-auto object-contain" />
         </div>
 
-        {/* Login card */}
         <div className="bg-card border border-border rounded-sm p-8 shadow-2xl shadow-black/30">
           <div className="mb-6">
-            <h2 className="font-['Barlow_Condensed'] text-xl font-bold uppercase tracking-tight text-foreground mb-1">관리자 로그인</h2>
-            <p className="font-mono text-[13px] text-muted-foreground">승인된 관리자 계정만 접근 가능합니다</p>
+            <h2 className="font-['Barlow_Condensed'] text-xl font-bold uppercase tracking-tight text-foreground mb-1">{t("admin_login_title")}</h2>
+            <p className="font-mono text-[13px] text-muted-foreground">{t("admin_login_desc")}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">이메일</label>
+              <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{t("email")}</label>
               <div className="relative">
                 <div className="absolute left-3 top-1/2 -translate-y-1/2">
                   <div className="w-4 h-4 text-muted-foreground flex items-center justify-center">
@@ -101,7 +94,7 @@ function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">비밀번호</label>
+              <label className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{t("password")}</label>
               <div className="relative">
                 <div className="absolute left-3 top-1/2 -translate-y-1/2">
                   <div className="w-4 h-4 text-muted-foreground flex items-center justify-center">
@@ -130,32 +123,30 @@ function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
               {loading
                 ? <div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />
                 : <LogIn size={13} />}
-              {loading ? "로그인 중..." : "로그인"}
+              {loading ? t("logging_in") : t("login")}
             </button>
           </form>
 
-          {/* Divider */}
           <div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-border" />
-            <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">보안 정보</span>
+            <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{t("security_info")}</span>
             <div className="flex-1 h-px bg-border" />
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             {[
-              { icon: "🔒", label: "TLS 암호화" },
-              { icon: "📋", label: "접근 기록" },
-              { icon: "🛡", label: "2단계 인증" },
+              { icon: "🔒", labelKey: "tls_encrypt" as const },
+              { icon: "📋", labelKey: "access_log" as const },
+              { icon: "🛡", labelKey: "two_fa" as const },
             ].map((item) => (
-              <div key={item.label} className="bg-secondary/60 border border-border/50 rounded-sm px-3 py-2.5 flex flex-col items-center gap-1">
+              <div key={item.labelKey} className="bg-secondary/60 border border-border/50 rounded-sm px-3 py-2.5 flex flex-col items-center gap-1">
                 <span className="text-base">{item.icon}</span>
-                <span className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest text-center">{item.label}</span>
+                <span className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest text-center">{t(item.labelKey)}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Footer */}
         <div className="mt-6 flex items-center justify-center gap-4">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-[#00d395]" />
@@ -172,6 +163,7 @@ function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
 // ─── Setup Banner ─────────────────────────────────────────────────────────────
 
 function SetupBanner({ onSetup }: { onSetup: () => void }) {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const run = async () => {
@@ -186,18 +178,61 @@ function SetupBanner({ onSetup }: { onSetup: () => void }) {
     <div className="flex items-center gap-3 bg-[#8247e5]/5 border border-[#8247e5]/20 rounded-sm px-4 py-3 mb-5">
       {done ? <Check size={12} className="text-[#00d395]" /> : <AlertTriangle size={12} className="text-[#f59e0b]" />}
       <span className="font-mono text-[14px] text-muted-foreground flex-1">
-        {done ? "DB 초기화 완료. 페이지를 새로고침합니다..." : "DB 테이블이 아직 생성되지 않았습니다. 초기화를 실행하세요."}
+        {done ? t("db_init_done") : t("db_init_needed")}
       </span>
       {!done && (
         <button onClick={run} disabled={loading}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-[#8247e5] text-white font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 disabled:opacity-50 transition-colors">
           {loading ? <div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" /> : null}
-          {loading ? "초기화 중..." : "DB 초기화"}
+          {loading ? t("db_init_loading") : t("db_init")}
         </button>
       )}
     </div>
   );
 }
+
+// ─── Role ─────────────────────────────────────────────────────────────────────
+
+export type PartnerRole = "system_admin" | "master" | "distributor" | "store";
+
+const ROLE_COLORS: Record<PartnerRole, string> = {
+  system_admin: "#ef4444",
+  master: "#8247e5",
+  distributor: "#3b82f6",
+  store: "#00d395",
+};
+
+const ROLE_ALLOWED: Record<PartnerRole, NavSection[]> = {
+  system_admin: [
+    "dashboard", "users", "wallets",
+    "purchases", "swaps", "transactions",
+    "blockchain", "webhooks",
+    "notices", "push", "support",
+    "partners", "settlements", "fees",
+    "coins", "oplogs", "sysconfig",
+    "transak_sync", "transak_orders",
+    "routes", "services", "config", "logs",
+  ],
+  master: [
+    "dashboard",
+    "users", "wallets",
+    "purchases", "swaps", "transactions",
+    "notices", "push", "support",
+    "partners", "settlements", "fees",
+  ],
+  distributor: [
+    "dashboard",
+    "users", "wallets",
+    "purchases", "swaps", "transactions",
+    "settlements",
+  ],
+  store: [
+    "dashboard",
+    "users", "wallets",
+    "purchases", "swaps", "transactions",
+    "settlements",
+  ],
+};
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 
@@ -211,118 +246,160 @@ type NavSection =
   | "transak_sync" | "transak_orders"
   | "routes" | "services" | "config" | "logs";
 
-const NAV_GROUPS = [
-  {
-    label: "개요",
-    items: [
-      { id: "dashboard" as NavSection, label: "대시보드", icon: Activity },
-    ],
-  },
-  {
-    label: "회원",
-    items: [
-      { id: "users" as NavSection, label: "회원관리", icon: Users },
-      { id: "wallets" as NavSection, label: "지갑관리", icon: Wallet },
-    ],
-  },
-  {
-    label: "거래",
-    items: [
-      { id: "purchases" as NavSection, label: "구매 관리", icon: ShoppingCart },
-      { id: "swaps" as NavSection, label: "스왑 관리", icon: ArrowLeftRight },
-      { id: "transactions" as NavSection, label: "전체 거래", icon: Activity },
-    ],
-  },
-  {
-    label: "블록체인",
-    items: [
-      { id: "blockchain" as NavSection, label: "블록체인 모니터링", icon: Cpu },
-      { id: "webhooks" as NavSection, label: "웹훅 이벤트", icon: Webhook },
-    ],
-  },
-  {
-    label: "콘텐츠",
-    items: [
-      { id: "notices" as NavSection, label: "공지관리", icon: Bell },
-      { id: "push" as NavSection, label: "푸시관리", icon: Send },
-      { id: "support" as NavSection, label: "고객센터", icon: MessageSquare },
-    ],
-  },
-  {
-    label: "파트너",
-    items: [
-      { id: "partners" as NavSection, label: "파트너 관리", icon: Users },
-      { id: "settlements" as NavSection, label: "정산 관리", icon: CircleDollarSign },
-      { id: "fees" as NavSection, label: "수수료 설정", icon: Percent },
-    ],
-  },
-  {
-    label: "운영",
-    items: [
-      { id: "coins" as NavSection, label: "코인 관리", icon: CircleDollarSign },
-      { id: "oplogs" as NavSection, label: "운영 로그", icon: FileText },
-      { id: "sysconfig" as NavSection, label: "시스템 설정", icon: Settings2 },
-    ],
-  },
-  {
-    label: "Transak",
-    items: [
-      { id: "transak_sync" as NavSection,   label: "Lookup 동기화", icon: RefreshCw },
-      { id: "transak_orders" as NavSection, label: "주문/KYC 관리",  icon: ShoppingCart },
-    ],
-  },
-  {
-    label: "BFF",
-    items: [
-      { id: "routes" as NavSection, label: "API Routes", icon: Route },
-      { id: "services" as NavSection, label: "Services", icon: Database },
-      { id: "config" as NavSection, label: "Config & Flags", icon: Settings },
-      { id: "logs" as NavSection, label: "Request Logs", icon: Globe },
-    ],
-  },
-];
+function buildNavGroups(t: (k: any) => string) {
+  return [
+    {
+      label: t("nav_overview"),
+      items: [
+        { id: "dashboard" as NavSection, label: t("nav_dashboard"), icon: Activity },
+      ],
+    },
+    {
+      label: t("nav_members"),
+      items: [
+        { id: "users" as NavSection, label: t("nav_users"), icon: Users },
+        { id: "wallets" as NavSection, label: t("nav_wallets"), icon: Wallet },
+      ],
+    },
+    {
+      label: t("nav_transactions"),
+      items: [
+        { id: "purchases" as NavSection, label: t("nav_purchases"), icon: ShoppingCart },
+        { id: "swaps" as NavSection, label: t("nav_swaps"), icon: ArrowLeftRight },
+        { id: "transactions" as NavSection, label: t("nav_all_tx"), icon: Activity },
+      ],
+    },
+    {
+      label: t("nav_blockchain"),
+      items: [
+        { id: "blockchain" as NavSection, label: t("nav_blockchain_monitor"), icon: Cpu },
+        { id: "webhooks" as NavSection, label: t("nav_webhooks"), icon: Webhook },
+      ],
+    },
+    {
+      label: t("nav_content"),
+      items: [
+        { id: "notices" as NavSection, label: t("nav_notices"), icon: Bell },
+        { id: "push" as NavSection, label: t("nav_push"), icon: Send },
+        { id: "support" as NavSection, label: t("nav_support"), icon: MessageSquare },
+      ],
+    },
+    {
+      label: t("nav_partners"),
+      items: [
+        { id: "partners" as NavSection, label: t("nav_partners_mgmt"), icon: Users },
+        { id: "settlements" as NavSection, label: t("nav_settlements"), icon: CircleDollarSign },
+        { id: "fees" as NavSection, label: t("nav_fees"), icon: Percent },
+      ],
+    },
+    {
+      label: t("nav_ops"),
+      items: [
+        { id: "coins" as NavSection, label: t("nav_coins"), icon: CircleDollarSign },
+        { id: "oplogs" as NavSection, label: t("nav_oplogs"), icon: FileText },
+        { id: "sysconfig" as NavSection, label: t("nav_sysconfig"), icon: Settings2 },
+      ],
+    },
+    {
+      label: "Transak",
+      items: [
+        { id: "transak_sync" as NavSection, label: t("nav_transak_sync"), icon: RefreshCw },
+        { id: "transak_orders" as NavSection, label: t("nav_transak_orders"), icon: ShoppingCart },
+      ],
+    },
+    {
+      label: "BFF",
+      items: [
+        { id: "routes" as NavSection, label: "API Routes", icon: Route },
+        { id: "services" as NavSection, label: "Services", icon: Database },
+        { id: "config" as NavSection, label: "Config & Flags", icon: Settings },
+        { id: "logs" as NavSection, label: "Request Logs", icon: Globe },
+      ],
+    },
+  ];
+}
 
-const SECTION_TITLES: Record<NavSection, string> = {
-  dashboard: "대시보드",
-  users: "회원관리",
-  wallets: "지갑관리",
-  purchases: "구매 관리",
-  swaps: "스왑 관리",
-  transactions: "전체 거래내역",
-  blockchain: "블록체인 모니터링",
-  webhooks: "웹훅 이벤트",
-  notices: "공지관리",
-  push: "푸시관리",
-  support: "고객센터",
-  partners: "파트너 관리",
-  settlements: "정산 관리",
-  fees: "수수료 설정",
-  coins: "코인 관리",
-  oplogs: "운영 로그",
-  sysconfig: "시스템 설정",
-  transak_sync: "Transak Lookup 동기화",
-  transak_orders: "Transak 주문/KYC 관리",
-  routes: "API Routes",
-  services: "Service Health",
-  config: "Config & Feature Flags",
-  logs: "Request Logs",
-};
+function filterNavGroups(groups: ReturnType<typeof buildNavGroups>, role: PartnerRole) {
+  const allowed = new Set(ROLE_ALLOWED[role]);
+  return groups
+    .map((g) => ({ ...g, items: g.items.filter((item) => allowed.has(item.id)) }))
+    .filter((g) => g.items.length > 0);
+}
+
+function getSectionTitle(active: NavSection, t: (k: any) => string): string {
+  const map: Record<NavSection, string> = {
+    dashboard: t("section_dashboard"),
+    users: t("section_users"),
+    wallets: t("section_wallets"),
+    purchases: t("section_purchases"),
+    swaps: t("section_swaps"),
+    transactions: t("section_transactions"),
+    blockchain: t("section_blockchain"),
+    webhooks: t("section_webhooks"),
+    notices: t("section_notices"),
+    push: t("section_push"),
+    support: t("section_support"),
+    partners: t("section_partners"),
+    settlements: t("section_settlements"),
+    fees: t("section_fees"),
+    coins: t("section_coins"),
+    oplogs: t("section_oplogs"),
+    sysconfig: t("section_sysconfig"),
+    transak_sync: t("section_transak_sync"),
+    transak_orders: t("section_transak_orders"),
+    routes: "API Routes",
+    services: "Service Health",
+    config: "Config & Feature Flags",
+    logs: "Request Logs",
+  };
+  return map[active];
+}
+
+function getRoleLabel(role: PartnerRole, t: (k: any) => string): string {
+  const map: Record<PartnerRole, string> = {
+    system_admin: t("role_system_admin"),
+    master: t("role_master"),
+    distributor: t("role_distributor"),
+    store: t("role_store"),
+  };
+  return map[role];
+}
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function AdminApp() {
+  const { t } = useI18n();
   const [active, setActive] = useState<NavSection>("dashboard");
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [partnerRole, setPartnerRole] = useState<PartnerRole>("system_admin");
+  const [partnerName, setPartnerName] = useState<string | null>(null);
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [adminToken, setAdminToken] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user?.email) setUserEmail(data.session.user.email);
+    supabase.auth.getSession().then(async ({ data }) => {
+      const session = data.session;
+      if (session?.user?.email) {
+        setUserEmail(session.user.email);
+        setAdminToken(session.access_token);
+        try {
+          const res = await fetch(`${BASE}/partners/me`, {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          const info: { role: PartnerRole; partner: { id: string; name: string } | null } = await res.json();
+          setPartnerRole(info.role ?? "system_admin");
+          setPartnerName(info.partner?.name ?? null);
+          setPartnerId(info.partner?.id ?? null);
+          const allowed = ROLE_ALLOWED[info.role ?? "system_admin"];
+          setActive(allowed[0] as NavSection);
+        } catch { /* keep defaults */ }
+      }
       setCheckingAuth(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUserEmail(session?.user?.email ?? null);
+      if (!session) { setUserEmail(null); setPartnerRole("system_admin"); setPartnerName(null); setPartnerId(null); setAdminToken(null); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -335,16 +412,41 @@ export default function AdminApp() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
+    setPartnerRole("system_admin");
+    setPartnerName(null);
+    setPartnerId(null);
   };
 
+  const allNavGroups = buildNavGroups(t);
+  const navGroups = filterNavGroups(allNavGroups, partnerRole);
+
   if (checkingAuth) return <div className="min-h-screen bg-background flex items-center justify-center"><Spinner /></div>;
-  if (!userEmail) return <LoginScreen onLogin={(email) => setUserEmail(email)} />;
+
+  const handleLogin = async (email: string, accessToken: string) => {
+    setUserEmail(email);
+    setAdminToken(accessToken);
+    try {
+      const res = await fetch(`${BASE}/partners/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data: { role: PartnerRole; partner: { id: string; name: string } | null } = await res.json();
+      setPartnerRole(data.role ?? "system_admin");
+      setPartnerName(data.partner?.name ?? null);
+      setPartnerId(data.partner?.id ?? null);
+      const allowed = ROLE_ALLOWED[data.role ?? "system_admin"];
+      setActive(allowed[0] as NavSection);
+    } catch {
+      setPartnerRole("system_admin");
+    }
+  };
+
+  if (!userEmail) return <LoginScreen onLogin={handleLogin} />;
 
   const renderSection = () => {
     switch (active) {
-      case "dashboard":    return <DashboardSection />;
-      case "users":        return <UsersSection adminEmail={userEmail} />;
-      case "wallets":      return <WalletsSection />;
+      case "dashboard":    return <DashboardSection role={partnerRole} partnerId={partnerId} partnerName={partnerName} />;
+      case "users":        return <UsersSection adminEmail={userEmail} role={partnerRole} partnerId={partnerId} />;
+      case "wallets":      return <WalletsSection adminEmail={userEmail} adminToken={adminToken} role={partnerRole} />;
       case "purchases":    return <PurchasesSection />;
       case "swaps":        return <SwapsSection />;
       case "transactions": return <TransactionsSection />;
@@ -353,9 +455,9 @@ export default function AdminApp() {
       case "notices":      return <NoticesSection adminEmail={userEmail} />;
       case "push":         return <PushSection adminEmail={userEmail} />;
       case "support":      return <SupportSection adminEmail={userEmail} />;
-      case "partners":     return <PartnersSection />;
+      case "partners":     return <PartnersSection role={partnerRole} partnerId={partnerId} partnerName={partnerName} />;
       case "settlements":  return <SettlementsSection />;
-      case "fees":         return <FeesSection adminEmail={userEmail} />;
+      case "fees":         return <FeesSection adminEmail={userEmail} role={partnerRole} partnerId={partnerId} />;
       case "coins":          return <CoinsSection adminEmail={userEmail} />;
       case "oplogs":         return <OpLogsSection />;
       case "sysconfig":      return <SysConfigSection adminEmail={userEmail} />;
@@ -371,27 +473,29 @@ export default function AdminApp() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col" style={{ fontFamily: "'Barlow', sans-serif" }}>
       <header className="border-b border-border px-5 py-2.5 flex items-center justify-between sticky top-0 bg-background/95 backdrop-blur z-20">
-        <div className="flex items-center gap-3">
-          <div className="w-6 h-6 rounded-sm bg-[#8247e5] flex items-center justify-center shrink-0">
-            <span className="text-white text-[13px] font-mono font-bold">W</span>
-          </div>
-          <span className="font-['Barlow_Condensed'] text-sm font-bold uppercase tracking-widest">Polygon Wallet</span>
-          <div className="h-4 w-px bg-border" />
-          <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">Admin Console</span>
+        <div className="flex items-center">
+          <ImageWithFallback src={adminHeaderLogo} alt="GMS Wallet" className="h-7 w-auto object-contain" />
         </div>
         <div className="flex items-center gap-3">
           <StatusDot status="online" />
           <span className="font-mono text-[13px] text-[#00d395]">Supabase Connected</span>
           <div className="h-4 w-px bg-border" />
-          <span className="font-mono text-[13px] text-muted-foreground">{userEmail}</span>
-          <button onClick={handleLogout} className="font-mono text-[13px] text-muted-foreground hover:text-[#ef4444] transition-colors">Sign out</button>
+          <span
+            className="font-mono text-[11px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-sm border"
+            style={{ color: ROLE_COLORS[partnerRole], borderColor: `${ROLE_COLORS[partnerRole]}40`, backgroundColor: `${ROLE_COLORS[partnerRole]}15` }}
+          >
+            {getRoleLabel(partnerRole, t)}
+          </span>
+          <span className="font-mono text-[13px] text-muted-foreground">{partnerName ?? userEmail}</span>
+          <LanguageSwitcher />
+          <button onClick={handleLogout} className="font-mono text-[13px] text-muted-foreground hover:text-[#ef4444] transition-colors">{t("sign_out")}</button>
         </div>
       </header>
 
       <div className="flex flex-1">
         <nav className="w-52 shrink-0 border-r border-border sticky top-[41px] h-[calc(100vh-41px)] overflow-y-auto py-4 flex flex-col" style={{ scrollbarWidth: "none" }}>
           <div className="px-3 space-y-5 flex-1">
-            {NAV_GROUPS.map((group) => (
+            {navGroups.map((group) => (
               <div key={group.label}>
                 <div className="px-2 mb-1.5 font-mono text-[12px] uppercase tracking-widest text-muted-foreground">{group.label}</div>
                 <div className="space-y-0.5">
@@ -415,7 +519,7 @@ export default function AdminApp() {
 
         <main className="flex-1 p-6 min-w-0 overflow-y-auto">
           <div className="mb-5">
-            <h1 className="font-['Barlow_Condensed'] text-2xl font-bold uppercase tracking-tight text-foreground">{SECTION_TITLES[active]}</h1>
+            <h1 className="font-['Barlow_Condensed'] text-2xl font-bold uppercase tracking-tight text-foreground">{getSectionTitle(active, t)}</h1>
           </div>
           {needsSetup && <SetupBanner onSetup={() => setNeedsSetup(false)} />}
           {renderSection()}

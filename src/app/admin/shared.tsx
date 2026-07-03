@@ -14,6 +14,15 @@ export async function api(path: string, opts?: RequestInit) {
   return res.json();
 }
 
+export async function apiAuth(path: string, token: string, opts?: RequestInit) {
+  const res = await fetch(BASE + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, ...opts?.headers },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
 export function Badge({ children, variant = "default" }: { children: React.ReactNode; variant?: "default" | "green" | "yellow" | "red" | "blue" | "purple" | "gray" }) {

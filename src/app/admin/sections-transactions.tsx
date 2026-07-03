@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Plus, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, api } from "./shared";
+import { useI18n } from "../../lib/i18n";
 
 export function PurchasesSection() {
+  const { t } = useI18n();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -30,17 +32,17 @@ export function PurchasesSection() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-4 gap-3">
-        <StatCard label="총 구매 건수" value={String(txs.length)} />
-        <StatCard label="완료" value={String(completed.length)} accent="#00d395" sub={`$${totalVolume.toFixed(0)} 총 거래액`} />
-        <StatCard label="실패" value={String(failed.length)} accent="#ef4444" />
-        <StatCard label="대기중" value={String(txs.filter((t) => t.status === "pending").length)} accent="#f59e0b" />
+        <StatCard label={t("tx_total_purchase")} value={String(txs.length)} />
+        <StatCard label={t("tx_completed")} value={String(completed.length)} accent="#00d395" sub={`$${totalVolume.toFixed(0)}`} />
+        <StatCard label={t("tx_failed_label")} value={String(failed.length)} accent="#ef4444" />
+        <StatCard label={t("tx_pending_label")} value={String(txs.filter((tx) => tx.status === "pending").length)} accent="#f59e0b" />
       </div>
 
       <div className="flex items-center gap-2">
         {["all", "completed", "pending", "failed"].map((f) => (
           <button key={f} onClick={() => setStatusFilter(f)}
             className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${statusFilter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {f === "all" ? "전체" : f}
+            {f === "all" ? t("con_all") : f}
           </button>
         ))}
         <button onClick={fetchTxs} className="ml-auto p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={11} /></button>
@@ -51,14 +53,14 @@ export function PurchasesSection() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["금액", "코인", "결제 업체", "상태", "실패 사유", "일시"].map((h) => (
+                {[t("tx_col_amount"), t("tx_col_coin"), t("tx_col_provider"), t("tx_col_status"), t("tx_col_fail_reason"), t("tx_col_date")].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">구매 내역 없음</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("tx_no_purchase")}</td></tr>
               ) : filtered.map((tx, i) => (
                 <tr key={tx.id} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === filtered.length - 1 ? "border-0" : ""}`}>
                   <td className="px-4 py-3 font-mono text-sm text-foreground">{parseFloat(tx.amount).toFixed(4)}</td>
@@ -68,7 +70,7 @@ export function PurchasesSection() {
                     <Badge variant={tx.status === "completed" ? "green" : tx.status === "pending" ? "yellow" : "red"}>{tx.status}</Badge>
                   </td>
                   <td className="px-4 py-3 font-mono text-[13px] text-[#ef4444]">{tx.failure_reason ?? "—"}</td>
-                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString("ko-KR")}</td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -80,6 +82,7 @@ export function PurchasesSection() {
 }
 
 export function SwapsSection() {
+  const { t } = useI18n();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -103,10 +106,10 @@ export function SwapsSection() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-4 gap-3">
-        <StatCard label="총 스왑 건수" value={String(txs.length)} />
-        <StatCard label="성공" value={String(success)} accent="#00d395" />
-        <StatCard label="실패" value={String(txs.filter((t) => t.status === "failed").length)} accent="#ef4444" />
-        <StatCard label="성공률" value={`${successRate}%`} accent="#8247e5" />
+        <StatCard label={t("tx_total_swap")} value={String(txs.length)} />
+        <StatCard label={t("tx_success")} value={String(success)} accent="#00d395" />
+        <StatCard label={t("tx_failed_label")} value={String(txs.filter((tx) => tx.status === "failed").length)} accent="#ef4444" />
+        <StatCard label={t("tx_success_rate")} value={`${successRate}%`} accent="#8247e5" />
       </div>
 
       <div className="flex justify-end">
@@ -120,14 +123,14 @@ export function SwapsSection() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["From", "To", "수량", "DEX", "수수료", "TX Hash", "상태", "일시"].map((h) => (
+                {["From", "To", t("tx_col_qty"), "DEX", t("tx_col_dex_fee"), "TX Hash", t("tx_col_status"), t("tx_col_date")].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {txs.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">스왑 내역 없음</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("tx_no_swap")}</td></tr>
               ) : txs.map((tx, i) => (
                 <tr key={tx.id} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === txs.length - 1 ? "border-0" : ""}`}>
                   <td className="px-4 py-3 font-mono text-sm text-foreground">{tx.from_currency ?? tx.currency}</td>
@@ -137,7 +140,7 @@ export function SwapsSection() {
                   <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{parseFloat(tx.fee ?? 0).toFixed(4)}</td>
                   <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{tx.tx_hash ? `${tx.tx_hash.slice(0, 10)}...` : "—"}</td>
                   <td className="px-4 py-3"><Badge variant={tx.status === "completed" ? "green" : tx.status === "pending" ? "yellow" : "red"}>{tx.status}</Badge></td>
-                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString("ko-KR")}</td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -149,6 +152,7 @@ export function SwapsSection() {
 }
 
 export function TransactionsSection() {
+  const { t } = useI18n();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -196,7 +200,7 @@ export function TransactionsSection() {
             </thead>
             <tbody>
               {txs.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">트랜잭션 없음</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("tx_no_tx")}</td></tr>
               ) : txs.map((tx, i) => (
                 <tr key={tx.id} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === txs.length - 1 ? "border-0" : ""}`}>
                   <td className="px-4 py-3"><Badge variant={tx.type === "purchase" ? "yellow" : tx.type === "swap" ? "purple" : "blue"}>{tx.type}</Badge></td>
@@ -204,7 +208,7 @@ export function TransactionsSection() {
                   <td className="px-4 py-3 font-mono text-sm text-muted-foreground">{tx.currency}</td>
                   <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{tx.tx_hash || "—"}</td>
                   <td className="px-4 py-3"><Badge variant={tx.status === "completed" ? "green" : tx.status === "pending" ? "yellow" : "red"}>{tx.status}</Badge></td>
-                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString("ko-KR")}</td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">{new Date(tx.created_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
