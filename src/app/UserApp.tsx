@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Wallet, Home, History, Bell, User, LogOut } from "lucide-react";
 import { useI18n, LanguageSwitcher } from "../lib/i18n";
+import headerLogo from "@/imports/gms_wallet_admin_logo.png";
+import { ImageWithFallback } from "@/app/components/figma/ImageWithFallback";
 import { supabase } from "../lib/supabase";
 import { Spinner } from "./user/components";
 import { AuthScreen } from "./user/AuthScreen";
@@ -98,11 +100,8 @@ export default function UserApp() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col max-w-lg mx-auto">
       <header className="sticky top-0 bg-background/95 backdrop-blur z-20 border-b border-border px-5 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-[#8247e5] flex items-center justify-center">
-            <Wallet size={14} className="text-white" />
-          </div>
-          <span className="font-['Barlow_Condensed'] text-sm font-bold uppercase tracking-widest">Polygon Wallet</span>
+        <div className="flex items-center">
+          <ImageWithFallback src={headerLogo} alt="GSM Wallets" className="h-7 w-auto object-contain" />
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-[13px] text-muted-foreground truncate max-w-[100px]">{userEmail}</span>
