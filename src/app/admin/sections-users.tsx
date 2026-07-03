@@ -325,12 +325,14 @@ function UserDetailPanel({
                   type="password"
                   placeholder={t("u_new_password_ph")}
                   value={pwForm.password}
+                  autoComplete="new-password"
                   onChange={(e) => { setPwForm({ ...pwForm, password: e.target.value }); setPwError(""); }}
                   className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50" />
                 <input
                   type="password"
                   placeholder={t("u_confirm_password_ph")}
                   value={pwForm.confirm}
+                  autoComplete="new-password"
                   onChange={(e) => { setPwForm({ ...pwForm, confirm: e.target.value }); setPwError(""); }}
                   className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50" />
                 {pwError && <div className="font-mono text-[12px] text-[#ef4444]">{pwError}</div>}
@@ -532,7 +534,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
       )}
       <div className="flex items-center gap-3">
         <input className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50"
-          placeholder="Search by email or wallet address..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          placeholder="Search by email or wallet address..." value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
         {["all", "active", "suspended", "pending_kyc"].map((f) => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${filter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
