@@ -122,7 +122,7 @@ function UserDetailPanel({
   };
 
   const statusColors: Record<string, string> = {
-    active: "#00d395", suspended: "#ef4444", pending_kyc: "#f59e0b",
+    active: "#00d395", suspended: "#ef4444", pending_kyc: "#f59e0b", pending_approval: "#f59e0b",
   };
   const kycColors: Record<string, string> = { T2: "#8247e5", T1: "#3b82f6", T0: "#6b7280" };
 
@@ -255,6 +255,7 @@ function UserDetailPanel({
                   onChange={(e) => setForm({ ...form, status: e.target.value })}
                   disabled={isSystemAdmin}
                   className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50 disabled:opacity-50">
+                  <option value="pending_approval">Pending Approval</option>
                   <option value="active">Active</option>
                   <option value="suspended">Suspended</option>
                   <option value="pending_kyc">Pending KYC</option>
@@ -400,7 +401,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
   const [showModal, setShowModal] = useState(false);
   const [walletModal, setWalletModal] = useState<{ email: string; wallets: any[] } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [form, setForm] = useState({ email: "", wallet_address: "", status: "active", kyc_tier: "T0", role: "user", partner_id: "" });
+  const [form, setForm] = useState({ email: "", wallet_address: "", status: "pending_approval", kyc_tier: "T0", role: "user", partner_id: "" });
   const [saving, setSaving] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
@@ -458,7 +459,9 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
         };
       });
       // Org isolation: non-system_admin cannot see system_admin accounts
+      // Self-exclusion: logged-in admin should not appear in the list
       const filteredUsers = users.filter((u: any) => {
+        if (u.email === adminEmail) return false;
         if (u.role === "system_admin") return role === "system_admin";
         return true;
       });
@@ -510,6 +513,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
     if (s === "active") return <Badge variant="green">active</Badge>;
     if (s === "suspended") return <Badge variant="red">suspended</Badge>;
     if (s === "pending_kyc") return <Badge variant="yellow">pending kyc</Badge>;
+    if (s === "pending_approval") return <Badge variant="yellow">pending approval</Badge>;
     return <Badge>{s}</Badge>;
   };
   const kycBadge = (t: string) => {
@@ -535,10 +539,16 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
       <div className="flex items-center gap-3">
         <input className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50"
           placeholder="Search by email or wallet address..." value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
-        {["all", "active", "suspended", "pending_kyc"].map((f) => (
+        {["all", "pending_approval", "active", "suspended", "pending_kyc"].map((f) => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${filter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {f.replace("_", " ")}
+            className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${
+              filter === f
+                ? f === "pending_approval"
+                  ? "bg-[#f59e0b]/15 border-[#f59e0b]/40 text-[#f59e0b]"
+                  : "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}>
+            {f.replace(/_/g, " ")}
           </button>
         ))}
         <button onClick={() => setShowModal(true)}
@@ -628,6 +638,19 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                         {!selectedUser && <td className="px-4 py-3 font-mono text-sm text-foreground">{u.tx_count}</td>}
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
+                            {u.status === "pending_approval" && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await api(`/users/${u.id}/approve`, { method: "POST" });
+                                  await supabase.from("admin_logs").insert({ admin_email: adminEmail, action: "approve_user", target_type: "user", target_id: u.id, detail: { email: u.email } });
+                                  fetchUsers();
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 font-mono text-[11px] bg-[#00d395]/10 text-[#00d395] border border-[#00d395]/30 rounded-sm hover:bg-[#00d395]/20 transition-colors"
+                                title="Approve">
+                                <CheckCircle size={10} /> {t("u_approve")}
+                              </button>
+                            )}
                             <button onClick={() => setSelectedUser(isSelected ? null : u)} className={`p-1 transition-colors ${isSelected ? "text-[#8247e5]" : "text-muted-foreground hover:text-[#8247e5]"}`} title="Detail / Edit"><Edit3 size={12} /></button>
                             <button onClick={(e) => deleteUser(e, u.id, u.email)} disabled={isAdmin} className={`p-1 transition-colors ${isAdmin ? "text-muted-foreground/30 cursor-not-allowed" : "text-muted-foreground hover:text-[#ef4444]"}`}><Trash2 size={12} /></button>
                           </div>
@@ -715,6 +738,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
               <div className="grid grid-cols-2 gap-2">
                 <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
                   className="bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none">
+                  <option value="pending_approval">Pending Approval</option>
                   <option value="active">Active</option>
                   <option value="suspended">Suspended</option>
                   <option value="pending_kyc">Pending KYC</option>

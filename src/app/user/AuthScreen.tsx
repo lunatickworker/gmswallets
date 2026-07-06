@@ -32,13 +32,12 @@ export function AuthScreen({ onAuth }: { onAuth: () => void }) {
       setPartnerLookupState("loading");
       try {
         const { data } = await supabase
-          .from("admin_users")
-          .select("id, email, name, role")
-          .ilike("email", `${partnerCode.trim()}@%`)
-          .limit(1)
+          .from("partners")
+          .select("id, email, name, type")
+          .eq("code", partnerCode.trim().toUpperCase())
           .maybeSingle();
         if (data) {
-          setPartnerInfo({ id: data.id, name: data.name ?? data.email, role: data.role, email: data.email });
+          setPartnerInfo({ id: data.id, name: data.name ?? data.email, role: data.type, email: data.email });
           setPartnerLookupState("found");
         } else {
           setPartnerInfo(null);
@@ -69,7 +68,7 @@ export function AuthScreen({ onAuth }: { onAuth: () => void }) {
           options: { data: { partner_id: partnerInfo?.id ?? null, partner_code: partnerCode.trim() || null } },
         });
         if (err) throw err;
-        setSuccess(t("signup_success"));
+        setSuccess(t("signup_pending_approval"));
         setTab("login");
       }
     } catch (err: any) {

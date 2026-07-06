@@ -203,7 +203,7 @@ app.post("/users", async (c) => {
   const { data, error } = await sb.from("users").insert({
     email:         body.email,
     wallet_address: body.wallet_address ?? null,
-    status:        body.status ?? "active",
+    status:        body.status ?? "pending_approval",
     kyc_tier:      body.kyc_tier ?? "T0",
     role:          body.role ?? "user",
     auth_user_id:  body.auth_user_id ?? null,
@@ -217,6 +217,20 @@ app.patch("/users/:id", async (c) => {
   const sb = getSupabase();
   const { data, error } = await sb.from("users").update(await c.req.json()).eq("id", c.req.param("id")).select().single();
   if (error) return c.json({ error: error.message }, 500);
+  return c.json(data);
+});
+
+app.post("/users/:id/approve", async (c) => {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("users")
+    .update({ status: "active" })
+    .eq("id", c.req.param("id"))
+    .eq("status", "pending_approval")
+    .select()
+    .single();
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data) return c.json({ error: "User not found or not pending approval" }, 404);
   return c.json(data);
 });
 

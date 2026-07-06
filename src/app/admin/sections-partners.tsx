@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
-import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw, EyeOff, Trash2, Save, Building2, Users } from "lucide-react";
+import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw, EyeOff, Trash2, Save, Building2, Users, Copy } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, api } from "./shared";
 import { useI18n } from "../../lib/i18n";
@@ -21,6 +21,8 @@ export interface Partner {
   status: "active" | "inactive";
   contact: string;
   created_at: string;
+  user_id?: string;
+  email?: string;
 }
 
 export const MOCK_MASTERS: Partner[] = [
@@ -249,6 +251,29 @@ function PartnerDetailPanel({
   const [pwSaving, setPwSaving] = useState(false);
   const [pwSaved, setPwSaved] = useState(false);
   const [pwError, setPwError] = useState("");
+  const [wallets, setWallets] = useState<any[]>([]);
+  const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
+
+  const CHAIN_COLORS: Record<string, string> = {
+    polygon: "#8247e5", ethereum: "#627eea", bnb: "#f0b90b",
+    tron: "#e84142", bitcoin: "#f7931a", solana: "#9945ff",
+  };
+
+  useEffect(() => {
+    const uid = partner.user_id;
+    if (!uid) return;
+    supabase
+      .from("wallets")
+      .select("chain_name, address, is_primary, derivation_path")
+      .eq("user_id", uid)
+      .then(({ data }) => setWallets(data ?? []));
+  }, [partner.id, partner.user_id]);
+
+  const copyAddr = (addr: string) => {
+    navigator.clipboard?.writeText(addr).catch(() => {});
+    setCopiedAddr(addr);
+    setTimeout(() => setCopiedAddr(null), 1500);
+  };
 
   const { t } = useI18n();
   const TYPE_KO: Record<PartnerType, string> = { master: t("role_master"), distributor: t("role_distributor"), store: t("role_store") };
@@ -401,7 +426,57 @@ function PartnerDetailPanel({
                   <span className="font-mono text-[13px] text-foreground">{partner.grandparent_name}</span>
                 </div>
               )}
+              {partner.email && (
+                <div className="flex justify-between items-center px-3 py-2">
+                  <span className="font-mono text-[12px] text-muted-foreground">Email</span>
+                  <span className="font-mono text-[13px] text-foreground">{partner.email}</span>
+                </div>
+              )}
             </div>
+
+            {/* 지갑 주소 */}
+            {wallets.length > 0 ? (
+              <div className="space-y-2">
+                <div className="font-mono text-[11px] text-muted-foreground uppercase tracking-widest">
+                  {t("u_wallet_addresses")} ({wallets.length})
+                </div>
+                <div className="space-y-1.5">
+                  {wallets.map((w) => (
+                    <div
+                      key={w.chain_name}
+                      className="flex items-center gap-2 bg-secondary border border-border rounded-sm px-3 py-2"
+                      style={{ borderColor: (CHAIN_COLORS[w.chain_name] ?? "#6b7280") + "30" }}
+                    >
+                      <div
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-background shrink-0"
+                        style={{ backgroundColor: CHAIN_COLORS[w.chain_name] ?? "#6b7280" }}
+                      >
+                        {w.chain_name.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[11px] font-bold capitalize" style={{ color: CHAIN_COLORS[w.chain_name] ?? "#6b7280" }}>{w.chain_name}</span>
+                          {w.is_primary && <span className="font-mono text-[9px] text-[#00d395] border border-[#00d395]/30 px-1 rounded">primary</span>}
+                        </div>
+                        <div className="font-mono text-[11px] text-muted-foreground truncate">{w.address}</div>
+                      </div>
+                      <button
+                        onClick={() => copyAddr(w.address)}
+                        className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
+                      >
+                        {copiedAddr === w.address
+                          ? <Check size={11} className="text-[#00d395]" />
+                          : <Copy size={11} />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4 font-mono text-[13px] text-muted-foreground border border-dashed border-border rounded-sm">
+                {t("u_no_wallet")}
+              </div>
+            )}
           </div>
         )}
 

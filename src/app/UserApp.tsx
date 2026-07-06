@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Wallet, Home, History, Bell, User, LogOut } from "lucide-react";
+import { Wallet, Home, History, Bell, User, LogOut, Clock } from "lucide-react";
 import { useI18n, LanguageSwitcher } from "../lib/i18n";
 import headerLogo from "@/imports/gms_wallet_admin_logo.png";
 import { ImageWithFallback } from "@/app/components/figma/ImageWithFallback";
@@ -70,6 +70,32 @@ export default function UserApp() {
 
   if (checkingAuth) return <div className="min-h-screen bg-background flex items-center justify-center"><Spinner size={20} /></div>;
   if (!authed)      return <AuthScreen onAuth={() => setAuthed(true)} />;
+
+  if (profile && profile.status === "pending_approval") {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-6">
+        <div className="w-full max-w-sm text-center space-y-5">
+          <div className="flex justify-center">
+            <div className="w-16 h-16 rounded-sm bg-[#f59e0b]/10 border border-[#f59e0b]/30 flex items-center justify-center">
+              <Clock size={28} className="text-[#f59e0b]" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h1 className="font-mono text-[16px] font-bold text-foreground uppercase tracking-widest">{t("pending_approval_title")}</h1>
+            <p className="font-mono text-[13px] text-muted-foreground leading-relaxed">{t("pending_approval_desc")}</p>
+          </div>
+          <div className="bg-[#f59e0b]/5 border border-[#f59e0b]/20 rounded-sm px-4 py-3">
+            <p className="font-mono text-[13px] text-[#f59e0b]">{userEmail}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full py-2.5 border border-border text-muted-foreground font-mono text-[13px] uppercase tracking-widest rounded-sm hover:text-foreground hover:border-foreground/30 transition-colors flex items-center justify-center gap-2">
+            <LogOut size={12} /> {t("sign_out")}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const BOTTOM_TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "home",          label: t("tab_home"),          icon: Home },
