@@ -454,7 +454,7 @@ export function CoinsSection({ adminEmail }: { adminEmail: string }) {
         </button>
       </div>
 
-      {loading ? <Spinner /> : (
+      {loading && coins.length === 0 ? <Spinner /> : (
         <div className="bg-card border border-border rounded-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -599,11 +599,11 @@ export function OpLogsSection() {
           </button>
         ))}
         <button onClick={fetchLogs} className="ml-auto p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors">
-          <RefreshCw size={11} />
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
 
-      {loading ? <Spinner /> : tab === "admin" ? (
+      {loading && logs.length === 0 ? <Spinner /> : tab === "admin" ? (
         <div className="bg-card border border-border rounded-sm overflow-hidden font-mono text-[14px]">
           <div className="grid grid-cols-[160px_160px_200px_1fr_80px] px-4 py-2 border-b border-border text-[13px] text-muted-foreground uppercase tracking-widest">
             <span>Time</span><span>Admin</span><span>Action</span><span>Detail</span><span>Target</span>
@@ -941,11 +941,11 @@ export function TransakOrdersSection() {
           </button>
         ))}
         <button onClick={fetchData} className="ml-auto p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors">
-          <RefreshCw size={11} />
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
 
-      {loading ? <Spinner /> : tab === "orders" ? (
+      {loading && orders.length === 0 && customers.length === 0 ? <Spinner /> : tab === "orders" ? (
         <div className="bg-card border border-border rounded-sm overflow-hidden">
           {orders.length === 0 ? (
             <div className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">주문 없음</div>

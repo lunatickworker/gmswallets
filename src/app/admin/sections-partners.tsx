@@ -787,7 +787,7 @@ export function PartnersSection({ role = "system_admin", partnerId = null, partn
           </button>
         ))}
         <button onClick={fetchPartners} className="p-2 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors" title="새로고침">
-          <RefreshCw size={12} />
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
         </button>
         <button onClick={() => setModal({ open: true, item: null })}
           className="ml-auto flex items-center gap-1.5 px-3 py-2 bg-[#8247e5] text-white font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
@@ -798,7 +798,7 @@ export function PartnersSection({ role = "system_admin", partnerId = null, partn
       {/* Table + Detail Panel */}
       <div className="flex gap-4 items-start">
         <div className={selectedPartner ? "flex-1 min-w-0 overflow-hidden" : "w-full"}>
-          {loading ? <Spinner /> : (
+          {loading && list.length === 0 ? <Spinner /> : (
           <div className="bg-card border border-border rounded-sm overflow-hidden">
             <table className="w-full">
               <thead>
@@ -1004,14 +1004,56 @@ function generateMockSettlements(): Settlement[] {
   return entries.reverse();
 }
 
+// ─── Settlement date helpers ──────────────────────────────────────────────────
+type SDatePreset = "today" | "yesterday" | "week" | "month" | "custom";
+const S_PRESET_LABELS: Record<SDatePreset, string> = {
+  today: "금일", yesterday: "어제", week: "7일", month: "이번달", custom: "기간설정",
+};
+function getSDateBounds(preset: SDatePreset, from: string, to: string) {
+  const now = new Date();
+  const d2s = (d: Date) => d.toISOString().slice(0, 10);
+  const today = d2s(now);
+  if (preset === "today")     return { from: today, to: today };
+  if (preset === "yesterday") { const y = new Date(now); y.setDate(y.getDate()-1); const ys = d2s(y); return { from: ys, to: ys }; }
+  if (preset === "week")      { const w = new Date(now); w.setDate(w.getDate()-6); return { from: d2s(w), to: today }; }
+  if (preset === "month")     return { from: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`, to: today };
+  return { from, to };
+}
+
+type StoreGroup = {
+  store_id: string;
+  store_name: string;
+  distributor_name: string;
+  master_name: string;
+  count: number;
+  total_gross: number;
+  total_system_fee: number;
+  total_master_fee: number;
+  total_dist_fee: number;
+  total_net: number;
+  pending_count: number;
+  settled_count: number;
+  system_fee_rate: number;
+  master_fee_rate: number;
+  dist_fee_rate: number;
+  items: Settlement[];
+};
+
 export function SettlementsSection() {
   const { t } = useI18n();
   const [rawSettlements, setRawSettlements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeFilter, setStoreFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
+  const [datePreset, setDatePreset] = useState<SDatePreset>("month");
+  const [dateFrom, setDateFrom] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [expanded, setExpanded] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
+  const [viewMode, setViewMode] = useState<"store" | "all">("store");
 
   const fetchSettlements = useCallback(async () => {
     setLoading(true);
@@ -1060,11 +1102,42 @@ export function SettlementsSection() {
   const displaySettlements = settlements.length > 0 ? settlements : generateMockSettlements();
 
   const storeOptions = Array.from(new Set(displaySettlements.map((s) => s.store_name)));
+  const { from: dFrom, to: dTo } = getSDateBounds(datePreset, dateFrom, dateTo);
+
   const filtered = displaySettlements.filter((s) => {
+    const d = s.created_at.slice(0, 10);
+    if (d < dFrom || d > dTo) return false;
     if (storeFilter !== "all" && s.store_name !== storeFilter) return false;
     if (statusFilter !== "all" && s.status !== statusFilter) return false;
     return true;
   });
+
+  // Per-store aggregation
+  const storeGroups: StoreGroup[] = Object.values(
+    filtered.reduce((acc, s) => {
+      const key = s.store_id || s.store_name;
+      if (!acc[key]) {
+        acc[key] = {
+          store_id: s.store_id, store_name: s.store_name,
+          distributor_name: s.distributor_name, master_name: s.master_name,
+          count: 0, total_gross: 0, total_system_fee: 0, total_master_fee: 0,
+          total_dist_fee: 0, total_net: 0, pending_count: 0, settled_count: 0,
+          system_fee_rate: s.system_fee_rate, master_fee_rate: s.master_fee_rate, dist_fee_rate: s.dist_fee_rate,
+          items: [],
+        };
+      }
+      const g = acc[key];
+      g.count++;
+      g.total_gross     += s.gross_krw;
+      g.total_system_fee += s.system_fee_amt;
+      g.total_master_fee += s.master_fee_amt;
+      g.total_dist_fee  += s.dist_fee_amt;
+      g.total_net       += s.net_krw;
+      if (s.status === "settled") g.settled_count++; else g.pending_count++;
+      g.items.push(s);
+      return acc;
+    }, {} as Record<string, StoreGroup>)
+  );
 
   const settlePending = async () => {
     if (!confirm("미정산 건을 일괄 처리하시겠습니까?")) return;
@@ -1084,171 +1157,303 @@ export function SettlementsSection() {
   const totalDist   = filtered.reduce((s, r) => s + r.dist_fee_amt, 0);
   const totalNet    = filtered.reduce((s, r) => s + r.net_krw, 0);
 
-  const fmt = (n: number) => n.toLocaleString() + "원";
+  const fmt  = (n: number) => n.toLocaleString() + "원";
+  const fmtD = (iso: string) => {
+    const d = new Date(iso);
+    return `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 bg-[#3b82f6]/5 border border-[#3b82f6]/20 rounded-sm px-4 py-2.5">
         <Circle size={8} className="text-[#3b82f6] fill-[#3b82f6]" />
         <span className="font-mono text-[14px] text-[#3b82f6]">
-          사용자 충전 금액은 원본 그대로 표시되며, 수수료는 입금 즉시 자동 차감됩니다. 매장에는 순정산금액이 지급됩니다.
+          수수료는 구매 즉시 자동 차감됩니다. 수수료 구조: 구매금액 − 시스템({SYSTEM_FEE_RATE}%) − 마스터 − 총판 = 매장 순정산
         </span>
       </div>
 
       {/* Summary stats */}
       <div className="grid grid-cols-5 gap-3">
-        <StatCard label="총 입금액" value={fmt(totalGross)} sub="사용자 구매 합계" />
+        <StatCard label="총 구매금액" value={fmt(totalGross)} sub={`${filtered.length}건`} />
         <StatCard label="시스템 수수료" value={fmt(totalSystem)} sub={`${SYSTEM_FEE_RATE}% 적용`} accent="#ef4444" />
         <StatCard label="마스터 수수료" value={fmt(totalMaster)} sub="마스터 배분" accent="#8247e5" />
         <StatCard label="총판 수수료" value={fmt(totalDist)} sub="총판 배분" accent="#3b82f6" />
-        <StatCard label="매장 순정산" value={fmt(totalNet)} sub="매장 수령액" accent="#00d395" />
+        <StatCard label="매장 순정산 합계" value={fmt(totalNet)} sub={`${storeGroups.length}개 매장`} accent="#00d395" />
       </div>
 
-      {/* Fee structure legend */}
-      <div className="bg-card border border-border rounded-sm px-4 py-3">
-        <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">수수료 차감 구조 (현재 선택 필터 기준)</div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#ef4444]" />
-            <span className="font-mono text-[13px] text-foreground">시스템 {SYSTEM_FEE_RATE}%</span>
-          </div>
-          <span className="text-muted-foreground">+</span>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#8247e5]" />
-            <span className="font-mono text-[13px] text-foreground">마스터 수수료</span>
-          </div>
-          <span className="text-muted-foreground">+</span>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#3b82f6]" />
-            <span className="font-mono text-[13px] text-foreground">총판 수수료</span>
-          </div>
-          <span className="text-muted-foreground">=</span>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#00d395]" />
-            <span className="font-mono text-[13px] text-[#00d395] font-semibold">매장 순정산</span>
-          </div>
-          <div className="ml-auto font-mono text-[13px] text-muted-foreground">
-            총 차감율: {((totalGross - totalNet) / Math.max(1, totalGross) * 100).toFixed(2)}% | 정산율: {(totalNet / Math.max(1, totalGross) * 100).toFixed(2)}%
-          </div>
-        </div>
+      {/* Date range filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-mono text-[13px] text-muted-foreground">기간</span>
+        {(["today", "yesterday", "week", "month", "custom"] as SDatePreset[]).map((p) => (
+          <button key={p} onClick={() => setDatePreset(p)}
+            className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${datePreset === p ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+            {S_PRESET_LABELS[p]}
+          </button>
+        ))}
+        {datePreset === "custom" && (
+          <>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-secondary border border-border rounded-sm px-3 py-1.5 font-mono text-[13px] text-foreground focus:outline-none" />
+            <span className="text-muted-foreground font-mono text-[13px]">~</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              className="bg-secondary border border-border rounded-sm px-3 py-1.5 font-mono text-[13px] text-foreground focus:outline-none" />
+          </>
+        )}
       </div>
 
-      {/* Filters */}
+      {/* Other filters + view toggle */}
       <div className="flex items-center gap-2 flex-wrap">
         <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}
-          className="bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-[13px] text-foreground focus:outline-none">
+          className="bg-secondary border border-border rounded-sm px-3 py-1.5 font-mono text-[13px] text-foreground focus:outline-none">
           <option value="all">전체 매장</option>
           {storeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         {(["all", "pending", "settled"] as const).map((f) => (
           <button key={f} onClick={() => setStatusFilter(f)}
-            className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${statusFilter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {f === "all" ? "전체" : f === "pending" ? "정산대기" : "정산완료"}
+            className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${statusFilter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+            {f === "all" ? "전체" : f === "pending" ? "대기" : "완료"}
           </button>
         ))}
-        <button onClick={fetchSettlements} className="p-2 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={12} /></button>
+        <div className="w-px h-4 bg-border" />
+        {/* View mode toggle */}
+        {(["store", "all"] as const).map((v) => (
+          <button key={v} onClick={() => setViewMode(v)}
+            className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${viewMode === v ? "bg-[#00d395]/15 border-[#00d395]/40 text-[#00d395]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+            {v === "store" ? "매장별 집계" : "전체 내역"}
+          </button>
+        ))}
+        <button onClick={fetchSettlements} className="p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /></button>
         {rawSettlements.some((s) => s.status === "pending") && (
           <button onClick={settlePending} disabled={settling}
-            className="ml-auto flex items-center gap-1.5 px-3 py-2 bg-[#00d395] text-background font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#00d395]/80 disabled:opacity-50 transition-colors">
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#00d395] text-background font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#00d395]/80 disabled:opacity-50 transition-colors">
             {settling ? <Spinner /> : <Check size={12} />} 일괄 정산
           </button>
         )}
-        <span className={`${rawSettlements.some((s) => s.status === "pending") ? "" : "ml-auto"} font-mono text-[13px] text-muted-foreground`}>{filtered.length}건</span>
+        <span className={`${rawSettlements.some((s) => s.status === "pending") ? "" : "ml-auto"} font-mono text-[13px] text-muted-foreground`}>
+          {viewMode === "store" ? `${storeGroups.length}개 매장` : `${filtered.length}건`}
+        </span>
       </div>
-      {loading && <Spinner />}
+      {/* ── Store-aggregated view ── */}
+      {viewMode === "store" && (
+        <div className="bg-card border border-border rounded-sm overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {["매장 / 총판 / 마스터", "건수", "총 구매금액", "시스템 수수료", "마스터 수수료", "총판 수수료", "매장 순정산", "차감율", "상태", ""].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {storeGroups.length === 0 ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">정산 내역 없음</td></tr>
+              ) : storeGroups.map((g, i) => {
+                const deductRate = ((g.total_gross - g.total_net) / Math.max(1, g.total_gross) * 100).toFixed(1);
+                const allSettled = g.pending_count === 0;
+                const allPending = g.settled_count === 0;
+                const statusVar = allSettled ? "green" : allPending ? "yellow" : "purple";
+                const statusLabel = allSettled ? "완료" : allPending ? "대기" : `대기${g.pending_count}/완료${g.settled_count}`;
+                const isOpen = expanded === g.store_id;
+                return (
+                  <Fragment key={g.store_id}>
+                    <tr
+                      className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer ${i === storeGroups.length - 1 && !isOpen ? "border-0" : ""}`}
+                      onClick={() => setExpanded(isOpen ? null : g.store_id)}>
+                      {/* 매장 계층 */}
+                      <td className="px-3 py-3">
+                        <div className="font-['Barlow'] text-sm font-semibold text-foreground leading-tight">{g.store_name}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">{g.distributor_name} · {g.master_name}</div>
+                      </td>
+                      {/* 건수 */}
+                      <td className="px-3 py-3 font-mono text-[13px] text-foreground">{g.count}건</td>
+                      {/* 총 구매금액 */}
+                      <td className="px-3 py-3 font-['Barlow_Condensed'] text-base font-bold text-foreground whitespace-nowrap">{g.total_gross.toLocaleString()}</td>
+                      {/* 시스템 수수료 */}
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-[13px] text-[#ef4444] whitespace-nowrap">−{g.total_system_fee.toLocaleString()}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">{g.system_fee_rate}%</div>
+                      </td>
+                      {/* 마스터 수수료 */}
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-[13px] text-[#8247e5] whitespace-nowrap">−{g.total_master_fee.toLocaleString()}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">{g.master_name}</div>
+                      </td>
+                      {/* 총판 수수료 */}
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-[13px] text-[#3b82f6] whitespace-nowrap">−{g.total_dist_fee.toLocaleString()}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">{g.distributor_name}</div>
+                      </td>
+                      {/* 순정산 */}
+                      <td className="px-3 py-3 font-['Barlow_Condensed'] text-base font-bold text-[#00d395] whitespace-nowrap">{g.total_net.toLocaleString()}</td>
+                      {/* 차감율 */}
+                      <td className="px-3 py-3 font-mono text-[13px] text-muted-foreground">{deductRate}%</td>
+                      {/* 상태 */}
+                      <td className="px-3 py-3"><Badge variant={statusVar}>{statusLabel}</Badge></td>
+                      {/* expand */}
+                      <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{isOpen ? "▲" : "▼"}</td>
+                    </tr>
 
-      {/* Table */}
-      <div className="bg-card border border-border rounded-sm overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              {["매장", "사용자", "구매금액(원)", "코인", "시스템", "마스터", "총판", "순정산", "상태", "일시", ""].map((h) => (
-                <th key={h} className="px-3 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={11} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">정산 내역 없음</td></tr>
-            ) : filtered.map((s, i) => (
-              <Fragment key={s.id}>
-                <tr
-                  className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer ${i === filtered.length - 1 && expanded !== s.id ? "border-0" : ""}`}
-                  onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
-                  <td className="px-3 py-3">
-                    <div className="font-['Barlow'] text-sm font-semibold text-foreground">{s.store_name}</div>
-                    <div className="font-mono text-[12px] text-muted-foreground">{s.distributor_name}</div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="font-mono text-[13px] text-foreground">{s.user_id}</div>
-                    <div className="font-mono text-[12px] text-muted-foreground">{s.user_email}</div>
-                  </td>
-                  <td className="px-3 py-3 font-['Barlow_Condensed'] text-lg font-bold text-foreground">{s.gross_krw.toLocaleString()}</td>
-                  <td className="px-3 py-3">
-                    <div className="font-mono text-sm text-[#8247e5]">{s.coin_amount} {s.coin_symbol}</div>
-                  </td>
-                  <td className="px-3 py-3 font-mono text-[13px] text-[#ef4444]">-{s.system_fee_amt.toLocaleString()}</td>
-                  <td className="px-3 py-3 font-mono text-[13px] text-[#8247e5]">-{s.master_fee_amt.toLocaleString()}</td>
-                  <td className="px-3 py-3 font-mono text-[13px] text-[#3b82f6]">-{s.dist_fee_amt.toLocaleString()}</td>
-                  <td className="px-3 py-3 font-['Barlow_Condensed'] text-lg font-bold text-[#00d395]">{s.net_krw.toLocaleString()}</td>
-                  <td className="px-3 py-3"><Badge variant={s.status === "settled" ? "green" : "yellow"}>{s.status === "settled" ? "완료" : "대기"}</Badge></td>
-                  <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{new Date(s.created_at).toLocaleString({ month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                  <td className="px-3 py-3 font-mono text-[13px] text-muted-foreground">{expanded === s.id ? "▲" : "▼"}</td>
-                </tr>
-                {expanded === s.id && (
-                  <tr className="border-b border-border/30 bg-secondary/20">
-                    <td colSpan={11} className="px-6 py-4">
-                      <div className="grid grid-cols-2 gap-6">
-                        <div>
-                          <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">수수료 상세 내역</div>
-                          <div className="space-y-1.5">
-                            {[
-                              { label: "사용자 구매금액 (원본)", val: fmt(s.gross_krw), color: "text-foreground", sign: "" },
-                              { label: `시스템 수수료 (${s.system_fee_rate}%)`, val: fmt(s.system_fee_amt), color: "text-[#ef4444]", sign: "−" },
-                              { label: `마스터 수수료 ${s.master_fee_rate}% — ${s.master_name}`, val: fmt(s.master_fee_amt), color: "text-[#8247e5]", sign: "−" },
-                              { label: `총판 수수료 ${s.dist_fee_rate}% — ${s.distributor_name}`, val: fmt(s.dist_fee_amt), color: "text-[#3b82f6]", sign: "−" },
-                              { label: `매장 순정산 (${s.store_name})`, val: fmt(s.net_krw), color: "text-[#00d395]", sign: "=" },
-                            ].map((row) => (
-                              <div key={row.label} className={`flex justify-between items-center font-mono text-[13px] ${row.sign === "=" ? "border-t border-border pt-1.5 mt-1" : ""}`}>
-                                <span className="text-muted-foreground">{row.sign && <span className={`mr-1.5 font-bold ${row.color}`}>{row.sign}</span>}{row.label}</span>
-                                <span className={`font-bold ${row.color}`}>{row.val}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">사용자 코인 충전 내역 (원본)</div>
-                          <div className="bg-card border border-border rounded-sm px-4 py-3 space-y-2">
-                            <div className="flex justify-between font-mono text-[13px]">
-                              <span className="text-muted-foreground">충전 코인</span>
-                              <span className="text-[#8247e5] font-bold">{s.coin_amount} {s.coin_symbol}</span>
+                    {/* ── Expanded: fee breakdown + individual items ── */}
+                    {isOpen && (
+                      <tr className="border-b border-border/30 bg-secondary/20">
+                        <td colSpan={10} className="px-6 py-4">
+                          {/* Fee structure visual */}
+                          <div className="mb-4 bg-card border border-border rounded-sm px-4 py-3">
+                            <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-3">수수료 분배 구조 — {g.store_name}</div>
+                            <div className="flex items-stretch gap-0 rounded-sm overflow-hidden h-8 mb-2">
+                              {[
+                                { label: "시스템", amt: g.total_system_fee, color: "bg-[#ef4444]" },
+                                { label: "마스터", amt: g.total_master_fee, color: "bg-[#8247e5]" },
+                                { label: "총판", amt: g.total_dist_fee, color: "bg-[#3b82f6]" },
+                                { label: "매장", amt: g.total_net, color: "bg-[#00d395]" },
+                              ].map((seg) => {
+                                const pct = (seg.amt / Math.max(1, g.total_gross)) * 100;
+                                return pct > 0 ? (
+                                  <div key={seg.label} className={`${seg.color} flex items-center justify-center font-mono text-[11px] text-white font-bold`} style={{ width: `${pct}%` }}>
+                                    {pct > 5 ? `${pct.toFixed(1)}%` : ""}
+                                  </div>
+                                ) : null;
+                              })}
                             </div>
-                            <div className="flex justify-between font-mono text-[13px]">
-                              <span className="text-muted-foreground">지불 금액</span>
-                              <span className="text-foreground font-bold">{fmt(s.gross_krw)}</span>
-                            </div>
-                            <div className="flex justify-between font-mono text-[13px]">
-                              <span className="text-muted-foreground">사용자 ID</span>
-                              <span className="text-foreground">{s.user_id}</span>
-                            </div>
-                            <div className="flex justify-between font-mono text-[13px]">
-                              <span className="text-muted-foreground">구매 ID</span>
-                              <span className="text-muted-foreground">{s.purchase_id}</span>
-                            </div>
-                            <div className="mt-2 pt-2 border-t border-border font-mono text-[12px] text-muted-foreground">
-                              * 사용자 지갑에는 구매금액 전액에 해당하는 코인이 충전됩니다.
+                            <div className="flex gap-4 flex-wrap">
+                              {[
+                                { label: "구매금액", val: fmt(g.total_gross), color: "text-foreground" },
+                                { label: `시스템 (${g.system_fee_rate}%)`, val: `−${fmt(g.total_system_fee)}`, color: "text-[#ef4444]" },
+                                { label: `마스터`, val: `−${fmt(g.total_master_fee)}`, color: "text-[#8247e5]" },
+                                { label: `총판`, val: `−${fmt(g.total_dist_fee)}`, color: "text-[#3b82f6]" },
+                                { label: "매장 순정산", val: fmt(g.total_net), color: "text-[#00d395] font-bold" },
+                              ].map((r) => (
+                                <div key={r.label} className="flex flex-col">
+                                  <span className="font-mono text-[11px] text-muted-foreground">{r.label}</span>
+                                  <span className={`font-mono text-[13px] ${r.color}`}>{r.val}</span>
+                                </div>
+                              ))}
                             </div>
                           </div>
-                        </div>
-                      </div>
+
+                          {/* Individual settlement rows */}
+                          <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">개별 거래 내역 ({g.count}건)</div>
+                          <div className="bg-card border border-border rounded-sm overflow-hidden">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-border">
+                                  {["사용자 ID", "코인", "구매금액", "시스템", "마스터", "총판", "순정산", "상태", "일시"].map((h) => (
+                                    <th key={h} className="px-3 py-2 text-left font-mono text-[12px] text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {g.items.map((s, si) => (
+                                  <tr key={s.id} className={`border-b border-border/40 hover:bg-secondary/20 ${si === g.items.length - 1 ? "border-0" : ""}`}>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{s.user_id.slice(0, 8)}…</td>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-[#8247e5]">{s.coin_amount} {s.coin_symbol}</td>
+                                    <td className="px-3 py-2 font-mono text-[13px] font-bold text-foreground whitespace-nowrap">{s.gross_krw.toLocaleString()}</td>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-[#ef4444] whitespace-nowrap">−{s.system_fee_amt.toLocaleString()}</td>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-[#8247e5] whitespace-nowrap">−{s.master_fee_amt.toLocaleString()}</td>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-[#3b82f6] whitespace-nowrap">−{s.dist_fee_amt.toLocaleString()}</td>
+                                    <td className="px-3 py-2 font-mono text-[13px] font-bold text-[#00d395] whitespace-nowrap">{s.net_krw.toLocaleString()}</td>
+                                    <td className="px-3 py-2"><Badge variant={s.status === "settled" ? "green" : "yellow"}>{s.status === "settled" ? "완료" : "대기"}</Badge></td>
+                                    <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground whitespace-nowrap">{fmtD(s.created_at)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── All-items flat view ── */}
+      {viewMode === "all" && (
+        <div className="bg-card border border-border rounded-sm overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {["매장", "사용자 ID", "코인", "구매금액(원)", "시스템", "마스터", "총판", "순정산", "상태", "일시", ""].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={11} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">정산 내역 없음</td></tr>
+              ) : filtered.map((s, i) => (
+                <Fragment key={s.id}>
+                  <tr
+                    className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer ${i === filtered.length - 1 && expanded !== s.id ? "border-0" : ""}`}
+                    onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
+                    <td className="px-3 py-3">
+                      <div className="font-['Barlow'] text-sm font-semibold text-foreground leading-tight">{s.store_name}</div>
+                      <div className="font-mono text-[11px] text-muted-foreground">{s.distributor_name}</div>
                     </td>
+                    <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{s.user_id.slice(0, 10)}…</td>
+                    <td className="px-3 py-3 font-mono text-[13px] text-[#8247e5]">{s.coin_amount} {s.coin_symbol}</td>
+                    <td className="px-3 py-3 font-['Barlow_Condensed'] text-base font-bold text-foreground whitespace-nowrap">{s.gross_krw.toLocaleString()}</td>
+                    <td className="px-3 py-3 font-mono text-[13px] text-[#ef4444] whitespace-nowrap">−{s.system_fee_amt.toLocaleString()}</td>
+                    <td className="px-3 py-3 font-mono text-[13px] text-[#8247e5] whitespace-nowrap">−{s.master_fee_amt.toLocaleString()}</td>
+                    <td className="px-3 py-3 font-mono text-[13px] text-[#3b82f6] whitespace-nowrap">−{s.dist_fee_amt.toLocaleString()}</td>
+                    <td className="px-3 py-3 font-['Barlow_Condensed'] text-base font-bold text-[#00d395] whitespace-nowrap">{s.net_krw.toLocaleString()}</td>
+                    <td className="px-3 py-3"><Badge variant={s.status === "settled" ? "green" : "yellow"}>{s.status === "settled" ? "완료" : "대기"}</Badge></td>
+                    <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground whitespace-nowrap">{fmtD(s.created_at)}</td>
+                    <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{expanded === s.id ? "▲" : "▼"}</td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  {expanded === s.id && (
+                    <tr className="border-b border-border/30 bg-secondary/20">
+                      <td colSpan={11} className="px-6 py-4">
+                        <div className="grid grid-cols-2 gap-6">
+                          <div>
+                            <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">수수료 분배 내역</div>
+                            <div className="space-y-1.5">
+                              {[
+                                { label: "구매금액 (원본)", val: fmt(s.gross_krw), color: "text-foreground", sign: "" },
+                                { label: `시스템 수수료 (${s.system_fee_rate}%)`, val: fmt(s.system_fee_amt), color: "text-[#ef4444]", sign: "−" },
+                                { label: `마스터 수수료 — ${s.master_name}`, val: fmt(s.master_fee_amt), color: "text-[#8247e5]", sign: "−" },
+                                { label: `총판 수수료 — ${s.distributor_name}`, val: fmt(s.dist_fee_amt), color: "text-[#3b82f6]", sign: "−" },
+                                { label: `매장 순정산 — ${s.store_name}`, val: fmt(s.net_krw), color: "text-[#00d395]", sign: "=" },
+                              ].map((row) => (
+                                <div key={row.label} className={`flex justify-between items-center font-mono text-[13px] ${row.sign === "=" ? "border-t border-border pt-1.5 mt-1" : ""}`}>
+                                  <span className="text-muted-foreground">{row.sign && <span className={`mr-1.5 font-bold ${row.color}`}>{row.sign}</span>}{row.label}</span>
+                                  <span className={`font-bold ${row.color}`}>{row.val}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest mb-2">코인 충전 정보</div>
+                            <div className="bg-card border border-border rounded-sm px-4 py-3 space-y-2">
+                              {[
+                                { label: "충전 코인", val: `${s.coin_amount} ${s.coin_symbol}`, cls: "text-[#8247e5] font-bold" },
+                                { label: "지불 금액", val: fmt(s.gross_krw), cls: "text-foreground font-bold" },
+                                { label: "사용자 ID", val: s.user_id, cls: "text-foreground text-[12px]" },
+                                { label: "거래 ID",  val: s.purchase_id, cls: "text-muted-foreground text-[12px]" },
+                              ].map((r) => (
+                                <div key={r.label} className="flex justify-between font-mono text-[13px]">
+                                  <span className="text-muted-foreground">{r.label}</span>
+                                  <span className={r.cls}>{r.val}</span>
+                                </div>
+                              ))}
+                              <div className="pt-2 border-t border-border font-mono text-[12px] text-muted-foreground">
+                                * 사용자 지갑에는 구매금액 전액에 해당하는 코인이 충전됩니다.
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

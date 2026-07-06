@@ -199,6 +199,13 @@ app.get("/users", async (c) => {
 app.post("/users", async (c) => {
   const sb = getSupabase();
   const body = await c.req.json();
+
+  // 이메일 중복 체크: partners 테이블에 같은 이메일 존재 여부 확인
+  if (body.email) {
+    const { data: existingPartner } = await sb.from("partners").select("id").eq("email", body.email).maybeSingle();
+    if (existingPartner) return c.json({ error: `이미 파트너 계정으로 등록된 이메일입니다: ${body.email}` }, 409);
+  }
+
   // auth_user_id and partner_id are accepted from the app at registration time
   const { data, error } = await sb.from("users").insert({
     email:         body.email,
@@ -375,6 +382,12 @@ app.get("/partners", async (c) => {
 app.post("/partners", async (c) => {
   const sb   = getSupabase();
   const body = await c.req.json();
+
+  // 이메일 중복 체크: public.users 테이블에 같은 이메일 존재 여부 확인
+  if (body.email) {
+    const { data: existingUser } = await sb.from("users").select("id").eq("email", body.email).maybeSingle();
+    if (existingUser) return c.json({ error: `이미 일반 회원으로 등록된 이메일입니다: ${body.email}` }, 409);
+  }
 
   // Create Supabase Auth user if email + password provided
   let authUserId: string | null = null;
@@ -664,7 +677,7 @@ app.get("/wallet/status", async (c) => {
 
   const sb = getSupabase();
   const { data: user } = await sb.from("users")
-    .select("wallet_status, wallet_approved_at")
+    .select("wallet_status")
     .eq("id", caller.userId)
     .single();
 
@@ -675,7 +688,6 @@ app.get("/wallet/status", async (c) => {
 
   return c.json({
     wallet_status: user?.wallet_status ?? "none",
-    wallet_approved_at: user?.wallet_approved_at ?? null,
     wallets: wallets ?? [],
   });
 });
@@ -689,11 +701,12 @@ app.post("/wallet/register", async (c) => {
   const sb = getSupabase();
 
   const { data: user } = await sb.from("users")
-    .select("wallet_status")
+    .select("wallet_status, status")
     .eq("id", caller.userId)
     .single();
 
   if (!user) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
+  if (user.status !== "approved") return c.json({ error: "계정 승인 후 지갑을 생성할 수 있습니다." }, 403);
   if (user.wallet_status === "active") {
     return c.json({ error: "이미 지갑이 등록되어 있습니다." }, 409);
   }
@@ -741,111 +754,6 @@ app.post("/wallet/register", async (c) => {
   return c.json({ ok: true, wallets: inserted }, 201);
 });
 
-// ─── Admin: Wallet 승인/취소 ──────────────────────────────────────────────────
-
-// POST /admin/users/:id/wallet/approve - 관리자가 지갑 생성 승인
-app.post("/admin/users/:id/wallet/approve", async (c) => {
-  const adminAuth = c.req.header("Authorization");
-  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
-
-  // 관리자 토큰 검증
-  const sb = getSupabase();
-  const token = adminAuth.replace("Bearer ", "").trim();
-  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
-  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
-
-  const { data: adminRecord } = await sb.from("users")
-    .select("role")
-    .eq("auth_user_id", adminUser.id)
-    .maybeSingle();
-
-  const adminRoles = ["system_admin", "master", "distributor", "store"];
-  if (!adminRecord || !adminRoles.includes(adminRecord.role)) {
-    return c.json({ error: "forbidden" }, 403);
-  }
-
-  const targetUserId = c.req.param("id");
-  const { data: target } = await sb.from("users")
-    .select("wallet_status")
-    .eq("id", targetUserId)
-    .single();
-
-  if (!target) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
-  if (target.wallet_status === "active") return c.json({ error: "이미 지갑이 활성화된 사용자입니다." }, 409);
-
-  const { data, error } = await sb.from("users")
-    .update({
-      wallet_status:      "approved",
-      wallet_approved_at: new Date().toISOString(),
-      wallet_approved_by: adminUser.id,
-    })
-    .eq("id", targetUserId)
-    .select("id, email, wallet_status, wallet_approved_at")
-    .single();
-
-  if (error) return c.json({ error: error.message }, 500);
-
-  // 어드민 액션 로그
-  await sb.from("admin_logs").insert({
-    admin_email: adminUser.email ?? "",
-    action:      "wallet_approve",
-    target_type: "user",
-    target_id:   targetUserId,
-    detail:      { wallet_status: "approved" },
-  }).catch(() => {});
-
-  return c.json({ ok: true, user: data });
-});
-
-// POST /admin/users/:id/wallet/revoke - 관리자가 지갑 승인 취소 (active → none 불가, approved → none만)
-app.post("/admin/users/:id/wallet/revoke", async (c) => {
-  const adminAuth = c.req.header("Authorization");
-  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
-
-  const sb = getSupabase();
-  const token = adminAuth.replace("Bearer ", "").trim();
-  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
-  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
-
-  const { data: adminRecord } = await sb.from("users")
-    .select("role")
-    .eq("auth_user_id", adminUser.id)
-    .maybeSingle();
-
-  if (!adminRecord || !["system_admin", "master"].includes(adminRecord.role)) {
-    return c.json({ error: "forbidden: 시스템 관리자 또는 마스터만 승인 취소 가능" }, 403);
-  }
-
-  const targetUserId = c.req.param("id");
-  const { data: target } = await sb.from("users")
-    .select("wallet_status")
-    .eq("id", targetUserId)
-    .single();
-
-  if (!target) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
-  if (target.wallet_status === "active") {
-    return c.json({ error: "이미 활성화된 지갑은 취소할 수 없습니다." }, 409);
-  }
-
-  const { data, error } = await sb.from("users")
-    .update({ wallet_status: "none", wallet_approved_at: null, wallet_approved_by: null })
-    .eq("id", targetUserId)
-    .select("id, email, wallet_status")
-    .single();
-
-  if (error) return c.json({ error: error.message }, 500);
-
-  await sb.from("admin_logs").insert({
-    admin_email: adminUser.email ?? "",
-    action:      "wallet_revoke",
-    target_type: "user",
-    target_id:   targetUserId,
-    detail:      { wallet_status: "none" },
-  }).catch(() => {});
-
-  return c.json({ ok: true, user: data });
-});
-
 // GET /admin/wallets - 전체 지갑 목록 (어드민용)
 app.get("/admin/wallets", async (c) => {
   const adminAuth = c.req.header("Authorization");
@@ -860,7 +768,7 @@ app.get("/admin/wallets", async (c) => {
   const status = c.req.query("wallet_status") ?? "";
 
   let q = sb.from("users")
-    .select("id, email, wallet_status, wallet_approved_at, wallet_address, wallets(chain_name, chain_id, network, address, derivation_path, is_primary, created_at)")
+    .select("id, email, wallet_status, joined_at, wallets(chain_name, chain_id, network, address, derivation_path, is_primary, created_at)")
     .order("joined_at", { ascending: false });
 
   if (search) q = q.ilike("email", `%${search}%`);

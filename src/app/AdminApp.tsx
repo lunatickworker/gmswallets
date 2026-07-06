@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { ethers } from "ethers";
 import { generateAllChainWallets } from "./user/wallet";
-import { CHAINS_CONFIG } from "./user/constants";
+import { CHAINS_CONFIG, TOTAL_USD } from "./user/constants";
+import { useUsdToKrw } from "./user/hooks";
 import type { ChainWallet } from "./user/types";
 import { supabase } from "../lib/supabase";
 import { StatusDot, Spinner, api, BASE } from "./admin/shared";
@@ -430,6 +431,8 @@ function MyProfileModal({
   const [wallets, setWallets] = useState<{ chain_name: string; address: string }[]>([]);
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
   const [showCreateWallet, setShowCreateWallet] = useState(false);
+  const [showKrw, setShowKrw] = useState(false);
+  const { rate, loading: rateLoading } = useUsdToKrw();
 
   const loadWallets = (uid: string) => {
     supabase
@@ -478,8 +481,8 @@ function MyProfileModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-card border border-border rounded-sm w-full max-w-md shadow-2xl shadow-black/30">
+    <div className="fixed top-[41px] right-3 z-50 w-[340px] animate-in fade-in slide-in-from-top-2 duration-150">
+      <div className="bg-card border border-border rounded-sm shadow-2xl shadow-black/40 ring-1 ring-border/50">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
@@ -496,6 +499,26 @@ function MyProfileModal({
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X size={14} />
+          </button>
+        </div>
+
+        {/* Total Assets */}
+        <div className="px-5 py-4 border-b border-border bg-secondary/30">
+          <div className="font-mono text-[11px] text-muted-foreground uppercase tracking-widest mb-2">총 자산</div>
+          <button onClick={() => setShowKrw((v) => !v)} className="text-left group w-full">
+            <div className="font-['Barlow_Condensed'] text-3xl font-bold text-foreground group-hover:text-[#8247e5]/80 transition-colors">
+              {showKrw
+                ? `₩${(TOTAL_USD * rate).toLocaleString("ko-KR")}`
+                : `$${TOTAL_USD.toLocaleString("en-US", { minimumFractionDigits: 2 })}`}
+            </div>
+            <div className="font-mono text-[12px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
+              {showKrw
+                ? `$${TOTAL_USD.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+                : `₩${(TOTAL_USD * rate).toLocaleString("ko-KR")}`}
+              <span className="text-[11px] opacity-50">
+                {rateLoading ? "환율 로딩 중…" : `@${rate.toLocaleString("ko-KR")}원`}
+              </span>
+            </div>
           </button>
         </div>
 
@@ -629,6 +652,8 @@ function MyProfileModal({
           </div>
         </div>
       </div>
+      {/* 외부 클릭 시 닫기 */}
+      <div className="fixed inset-0 z-[-1]" onClick={onClose} />
     </div>
   );
 }
@@ -977,6 +1002,15 @@ export default function AdminApp() {
           <button onClick={handleLogout} className="font-mono text-[13px] text-muted-foreground hover:text-[#ef4444] transition-colors">{t("sign_out")}</button>
         </div>
       </header>
+      {showProfile && userEmail && (
+        <MyProfileModal
+          email={userEmail}
+          userId={userId}
+          partnerRole={partnerRole}
+          partnerName={partnerName}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
 
       <div className="flex flex-1">
         <nav className="w-52 shrink-0 border-r border-border sticky top-[41px] h-[calc(100vh-41px)] overflow-y-auto py-4 flex flex-col" style={{ scrollbarWidth: "none" }}>
@@ -1008,15 +1042,6 @@ export default function AdminApp() {
             <h1 className="font-['Barlow_Condensed'] text-2xl font-bold uppercase tracking-tight text-foreground">{getSectionTitle(active, t)}</h1>
           </div>
           {needsSetup && <SetupBanner onSetup={() => setNeedsSetup(false)} />}
-      {showProfile && userEmail && (
-        <MyProfileModal
-          email={userEmail}
-          userId={userId}
-          partnerRole={partnerRole}
-          partnerName={partnerName}
-          onClose={() => setShowProfile(false)}
-        />
-      )}
           {renderSection()}
         </main>
       </div>

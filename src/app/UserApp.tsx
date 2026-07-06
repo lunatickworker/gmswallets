@@ -42,12 +42,31 @@ export default function UserApp() {
   const loadProfile = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    try {
-      await supabase.from("users").upsert(
-        { auth_user_id: session.user.id, email: session.user.email! },
-        { onConflict: "auth_user_id", ignoreDuplicates: true }
-      );
-    } catch {}
+
+    // 파트너 계정이면 users 테이블에 생성하지 않고 어드민으로 이동
+    const { data: partner } = await supabase
+      .from("partners")
+      .select("id")
+      .eq("auth_user_id", session.user.id)
+      .maybeSingle();
+    if (partner) {
+      await supabase.auth.signOut();
+      window.location.href = "/admin";
+      return;
+    }
+
+    // 일반 회원: 회원가입 시 auth에만 등록되므로 첫 로그인 시 users 레코드 생성
+    const { data: existingUser } = await supabase
+      .from("users").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+    if (!existingUser) {
+      // users 테이블에 없으면 회원가입 경로로 온 것 → pending_approval 상태로 생성
+      await supabase.from("users").insert({
+        auth_user_id: session.user.id,
+        email: session.user.email!,
+        status: "pending_approval",
+      }).catch(() => {});
+    }
+
     const { data: user } = await supabase
       .from("users").select("*").eq("auth_user_id", session.user.id).single();
     if (!user) return;

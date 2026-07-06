@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Lock, Plus, X, Edit3, Trash2, Copy, Check, ToggleLeft, ToggleRight, Zap, ChevronDown, ChevronRight, CheckCircle, XCircle, User, Save, AlertTriangle } from "lucide-react";
+import { Lock, Plus, X, Edit3, Trash2, Copy, Check, ChevronDown, ChevronRight, CheckCircle, User, Save, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, api, apiAuth } from "./shared";
 import { useI18n } from "../../lib/i18n";
+import { TOTAL_USD } from "../user/constants";
+import { useUsdToKrw } from "../user/hooks";
 
 const CHAIN_COLORS: Record<string, string> = {
   polygon: "#8247e5", ethereum: "#627eea", bnb: "#f0b90b",
@@ -615,9 +617,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                         )}
                         {!selectedUser && (
                           <td className="px-4 py-3">
-                            {u.wallet_status === "active"   ? <Badge variant="green">active</Badge>
-                             : u.wallet_status === "approved" ? <Badge variant="yellow">approved</Badge>
-                             : <Badge variant="gray">none</Badge>}
+                            {u.wallet_status === "active" ? <Badge variant="green">active</Badge> : <Badge variant="gray">none</Badge>}
                           </td>
                         )}
                         {!selectedUser && (
@@ -778,23 +778,13 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
 
 // ─── WalletsSection ───────────────────────────────────────────────────────────
 
-export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: string | null; adminToken: string | null; role?: string }) {
+export function WalletsSection({ adminToken }: { adminEmail: string | null; adminToken: string | null; role?: string }) {
   const { t } = useI18n();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [autoApprove, setAutoApprove] = useState(false);
-  const [autoApproveLoading, setAutoApproveLoading] = useState(false);
-
-  const canRevoke = role === "system_admin" || role === "master";
-
-  useEffect(() => {
-    supabase.from("system_settings").select("value").eq("key", "wallet_auto_approve").maybeSingle()
-      .then(({ data }) => { if (data) setAutoApprove(data.value === "true"); });
-  }, []);
 
   const fetchWallets = useCallback(async () => {
     if (!adminToken) return;
@@ -810,61 +800,13 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
 
   useEffect(() => { fetchWallets(); }, [fetchWallets]);
 
-  const approve = async (userId: string) => {
-    if (!adminToken) return;
-    if (!confirm(t("w_approve_confirm"))) return;
-    setActionLoading(userId);
-    try {
-      await apiAuth(`/admin/users/${userId}/wallet/approve`, adminToken, { method: "POST" });
-      fetchWallets();
-    } catch (e: any) { alert(e.message); } finally { setActionLoading(null); }
-  };
-
-  const runAutoApproveNow = async (userList: any[]) => {
-    const eligible = userList.filter((u) => (u.kyc_tier === "T1" || u.kyc_tier === "T2") && u.wallet_status === "none");
-    for (const u of eligible) {
-      await apiAuth(`/admin/users/${u.id}/wallet/approve`, adminToken!, { method: "POST" }).catch(() => {});
-    }
-    return eligible.length;
-  };
-
-  const toggleAutoApprove = async () => {
-    const next = !autoApprove;
-    setAutoApprove(next);
-    await supabase.from("system_settings").upsert({ key: "wallet_auto_approve", value: String(next), updated_at: new Date().toISOString() }, { onConflict: "key" }).catch(() => {});
-    if (next) {
-      setAutoApproveLoading(true);
-      const count = await runAutoApproveNow(users);
-      setAutoApproveLoading(false);
-      if (count > 0) fetchWallets();
-    }
-  };
-
-  const applyAutoApproveNow = async () => {
-    setAutoApproveLoading(true);
-    const count = await runAutoApproveNow(users);
-    setAutoApproveLoading(false);
-    if (count > 0) fetchWallets();
-  };
-
-  const revoke = async (userId: string) => {
-    if (!adminToken) return;
-    if (!confirm(t("w_revoke_confirm"))) return;
-    setActionLoading(userId);
-    try {
-      await apiAuth(`/admin/users/${userId}/wallet/revoke`, adminToken, { method: "POST" });
-      fetchWallets();
-    } catch (e: any) { alert(e.message); } finally { setActionLoading(null); }
-  };
-
-  const noneCount     = users.filter((u) => u.wallet_status === "none").length;
-  const approvedCount = users.filter((u) => u.wallet_status === "approved").length;
-  const activeCount   = users.filter((u) => u.wallet_status === "active").length;
+  const { rate } = useUsdToKrw();
+  const noneCount   = users.filter((u) => u.wallet_status === "none").length;
+  const activeCount = users.filter((u) => u.wallet_status === "active").length;
 
   const walletStatusBadge = (s: string) => {
-    if (s === "active")   return <Badge variant="green">active</Badge>;
-    if (s === "approved") return <Badge variant="yellow">approved</Badge>;
-    return <Badge variant="gray">none</Badge>;
+    if (s === "active") return <Badge variant="green">{t("w_status_active")}</Badge>;
+    return <Badge variant="gray">{t("w_status_none")}</Badge>;
   };
 
   return (
@@ -874,33 +816,9 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
         <span className="font-mono text-[14px] text-[#f59e0b]">{t("w_non_custodial")}</span>
       </div>
 
-      <div className={`flex items-center gap-3 px-4 py-3 rounded-sm border ${autoApprove ? "bg-[#00d395]/5 border-[#00d395]/25" : "bg-card border-border"}`}>
-        <Zap size={13} className={autoApprove ? "text-[#00d395]" : "text-muted-foreground"} />
-        <div className="flex-1 min-w-0">
-          <span className="font-mono text-[13px] text-foreground font-bold uppercase tracking-widest">{t("w_auto_approve")}</span>
-          <span className="font-mono text-[13px] text-muted-foreground ml-2">
-            {autoApprove ? t("w_auto_approve_on") : t("w_auto_approve_off")}
-          </span>
-        </div>
-        {autoApprove && (
-          <button onClick={applyAutoApproveNow} disabled={autoApproveLoading}
-            className="flex items-center gap-1 px-2 py-1 font-mono text-[12px] border border-[#00d395]/40 text-[#00d395] rounded-sm hover:bg-[#00d395]/10 disabled:opacity-50 transition-colors">
-            {autoApproveLoading ? <span className="w-3 h-3 border border-[#00d395]/40 border-t-[#00d395] rounded-full animate-spin inline-block" /> : <Zap size={10} />}
-            {t("w_apply_now")}
-          </button>
-        )}
-        <button onClick={toggleAutoApprove} disabled={autoApproveLoading}
-          className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[13px] border rounded-sm transition-colors disabled:opacity-50"
-          style={autoApprove ? { borderColor: "#00d39540", color: "#00d395" } : { borderColor: "var(--border)", color: "var(--muted-foreground)" }}>
-          {autoApprove ? <ToggleRight size={15} /> : <ToggleLeft size={15} />}
-          {autoApprove ? "ON" : "OFF"}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <StatCard label={t("w_total_users")} value={String(users.length)} sub={t("w_wallet_targets")} />
-        <StatCard label={t("w_unapproved")} value={String(noneCount)} sub={t("w_approval_wait")} />
-        <StatCard label={t("w_approved_label")} value={String(approvedCount)} sub={t("w_app_wait")} accent="#f59e0b" />
+        <StatCard label={t("w_no_wallet_label")} value={String(noneCount)} sub={t("w_no_wallet_sub")} />
         <StatCard label={t("w_active_label")} value={String(activeCount)} sub={t("w_wallet_done")} accent="#00d395" />
       </div>
 
@@ -909,7 +827,7 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
           className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50"
           placeholder={t("w_email_search")} value={search} onChange={(e) => setSearch(e.target.value)}
         />
-        {["all", "none", "approved", "active"].map((f) => (
+        {["all", "none", "active"].map((f) => (
           <button key={f} onClick={() => setStatusFilter(f)}
             className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${statusFilter === f ? "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]" : "border-border text-muted-foreground hover:text-foreground"}`}>
             {f}
@@ -922,8 +840,8 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["", "Email", t("w_col_wallet_status"), t("w_col_address"), t("w_col_approved_date"), ""].map((h, i) => (
-                  <th key={i} className="px-4 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{h}</th>
+                {["", "Email", t("w_col_wallet_status"), t("w_col_joined"), t("w_col_wallet_created"), "총 자산"].map((h, i) => (
+                  <th key={i} className={`px-4 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest ${i === 5 ? "text-right" : ""}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -931,13 +849,13 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
               {users.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center font-mono text-[13px] text-muted-foreground">{t("w_no_users")}</td></tr>
               ) : users.map((u, i) => {
-                const primaryWallet = (u.wallets ?? []).find((w: any) => w.is_primary) ?? (u.wallets ?? [])[0];
+                const wallets: any[] = u.wallets ?? [];
+                const firstWallet = wallets[0];
                 const isExpanded = expandedId === u.id;
-                const hasMultiWallets = (u.wallets ?? []).length > 1;
                 return [
                   <tr key={u.id} className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${i === users.length - 1 && !isExpanded ? "border-0" : ""}`}>
                     <td className="px-4 py-3 w-6">
-                      {hasMultiWallets && (
+                      {wallets.length > 0 && (
                         <button onClick={() => setExpandedId(isExpanded ? null : u.id)} className="text-muted-foreground hover:text-foreground transition-colors">
                           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                         </button>
@@ -945,43 +863,38 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
                     </td>
                     <td className="px-4 py-3 font-['Barlow'] text-sm text-foreground">{u.email}</td>
                     <td className="px-4 py-3">{walletStatusBadge(u.wallet_status)}</td>
-                    <td className="px-4 py-3 font-mono text-[13px] text-[#8247e5]">
-                      {primaryWallet ? `${primaryWallet.address.slice(0, 14)}...${primaryWallet.address.slice(-6)}` : "—"}
+                    <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">
+                      {u.joined_at ? new Date(u.joined_at).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-4 py-3 font-mono text-[13px] text-muted-foreground">
-                      {u.wallet_approved_at ? new Date(u.wallet_approved_at).toLocaleDateString() : "—"}
+                      {firstWallet ? new Date(firstWallet.created_at).toLocaleDateString() : "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        {u.wallet_status === "none" && (
-                          <button
-                            onClick={() => approve(u.id)}
-                            disabled={actionLoading === u.id}
-                            className="flex items-center gap-1 px-2 py-1 text-[12px] font-mono bg-[#00d395]/10 text-[#00d395] border border-[#00d395]/30 rounded-sm hover:bg-[#00d395]/20 disabled:opacity-40 transition-colors">
-                            <CheckCircle size={10} /> {t("w_approve")}
-                          </button>
-                        )}
-                        {u.wallet_status === "approved" && canRevoke && (
-                          <button
-                            onClick={() => revoke(u.id)}
-                            disabled={actionLoading === u.id}
-                            className="flex items-center gap-1 px-2 py-1 text-[12px] font-mono bg-[#ef4444]/10 text-[#ef4444] border border-[#ef4444]/30 rounded-sm hover:bg-[#ef4444]/20 disabled:opacity-40 transition-colors">
-                            <XCircle size={10} /> {t("w_revoke")}
-                          </button>
-                        )}
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      {u.wallet_status === "active" ? (
+                        <div>
+                          <div className="font-['Barlow_Condensed'] text-base font-bold text-foreground">
+                            ${TOTAL_USD.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                          </div>
+                          <div className="font-mono text-[11px] text-muted-foreground">
+                            ₩{(TOTAL_USD * rate).toLocaleString("ko-KR")}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-[13px] text-muted-foreground/40">—</span>
+                      )}
                     </td>
                   </tr>,
                   isExpanded && (
                     <tr key={`${u.id}-detail`} className="border-b border-border/50 bg-secondary/20">
                       <td colSpan={6} className="px-8 py-3">
-                        <div className="space-y-1">
-                          {(u.wallets ?? []).map((w: any) => (
+                        <div className="space-y-1.5">
+                          {wallets.map((w: any) => (
                             <div key={w.chain_name} className="flex items-center gap-4 font-mono text-[13px]">
-                              <Badge variant={w.is_primary ? "purple" : "gray"}>{w.chain_name}</Badge>
-                              <span className="text-[#8247e5]">{w.address}</span>
-                              <span className="text-muted-foreground">{w.derivation_path}</span>
-                              <span className="text-muted-foreground">{new Date(w.created_at).toLocaleDateString()}</span>
+                              <span className="w-16 shrink-0">
+                                <Badge variant={w.is_primary ? "purple" : "gray"}>{w.chain_name}</Badge>
+                              </span>
+                              <span className="text-foreground font-mono">{w.address}</span>
+                              <span className="text-muted-foreground text-[12px]">{w.derivation_path}</span>
                             </div>
                           ))}
                         </div>
@@ -993,8 +906,8 @@ export function WalletsSection({ adminEmail, adminToken, role }: { adminEmail: s
             </tbody>
           </table>
           <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
-            <span className="font-mono text-[13px] text-muted-foreground">{users.length} users</span>
-            <span className="font-mono text-[13px] text-muted-foreground">active: {activeCount} · approved: {approvedCount} · none: {noneCount}</span>
+            <span className="font-mono text-[13px] text-muted-foreground">{users.length} {t("w_users_unit")}</span>
+            <span className="font-mono text-[13px] text-muted-foreground">active: {activeCount} · none: {noneCount}</span>
           </div>
         </div>
       )}

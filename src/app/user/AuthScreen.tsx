@@ -63,6 +63,11 @@ export function AuthScreen({ onAuth }: { onAuth: () => void }) {
         if (err) throw err;
         onAuth();
       } else {
+        // 파트너 이메일로 일반 회원가입 차단
+        const { data: existingPartner } = await supabase
+          .from("partners").select("id").eq("email", email).maybeSingle();
+        if (existingPartner) throw new Error(t("email_partner_conflict"));
+
         const { error: err } = await supabase.auth.signUp({
           email, password,
           options: { data: { partner_id: partnerInfo?.id ?? null, partner_code: partnerCode.trim() || null } },

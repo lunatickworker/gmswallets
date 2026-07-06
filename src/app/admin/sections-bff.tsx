@@ -469,10 +469,10 @@ export function LogsSection() {
     <div className="space-y-3">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2"><StatusDot status="online" /><span className="font-mono text-[14px] text-muted-foreground">LIVE → Supabase</span></div>
-        <button onClick={fetchLogs} className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={11} /> Refresh</button>
+        <button onClick={fetchLogs} className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm font-mono text-[13px] text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh</button>
         <span className="font-mono text-[13px] text-muted-foreground">{logs.length} entries</span>
       </div>
-      {loading ? <Spinner /> : (
+      {loading && logs.length === 0 ? <Spinner /> : (
         <div className="bg-card border border-border rounded-sm overflow-hidden font-mono text-[14px]">
           <div className="grid grid-cols-[110px_52px_200px_52px_60px_140px_100px] px-4 py-2 border-b border-border text-[13px] text-muted-foreground uppercase tracking-widest">
             <span>Time</span><span>Method</span><span>Path</span><span>Status</span><span>Latency</span><span>IP</span><span>User</span>
