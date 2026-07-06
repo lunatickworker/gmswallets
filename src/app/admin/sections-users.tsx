@@ -227,7 +227,7 @@ function UserDetailPanel({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-[11px] font-bold capitalize" style={{ color: CHAIN_COLORS[w.chain_name] ?? "#6b7280" }}>{w.chain_name}</span>
-                          {w.is_primary && <span className="font-mono text-[9px] text-[#00d395] border border-[#00d395]/30 px-1 rounded">primary</span>}
+                          {w.is_primary && <span className="font-mono text-[9px] text-[#00d395] border border-[#00d395]/30 px-1 rounded">{t("u_wallet_primary")}</span>}
                         </div>
                         <div className="font-mono text-[11px] text-muted-foreground truncate">{w.address}</div>
                       </div>
@@ -257,10 +257,10 @@ function UserDetailPanel({
                   onChange={(e) => setForm({ ...form, status: e.target.value })}
                   disabled={isSystemAdmin}
                   className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50 disabled:opacity-50">
-                  <option value="pending_approval">Pending Approval</option>
-                  <option value="active">Active</option>
-                  <option value="suspended">Suspended</option>
-                  <option value="pending_kyc">Pending KYC</option>
+                  <option value="pending_approval">{t("u_status_opt_pending_approval")}</option>
+                  <option value="active">{t("u_status_opt_active")}</option>
+                  <option value="suspended">{t("u_status_opt_suspended")}</option>
+                  <option value="pending_kyc">{t("u_status_opt_pending_kyc")}</option>
                 </select>
               </div>
 
@@ -290,9 +290,9 @@ function UserDetailPanel({
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
                   disabled={isSystemAdmin}
                   className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50 disabled:opacity-50">
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                  <option value="system_admin">System Admin</option>
+                  <option value="user">{t("u_role_opt_user")}</option>
+                  <option value="admin">{t("u_role_opt_admin")}</option>
+                  <option value="system_admin">{t("u_system_admin")}</option>
                 </select>
               </div>
 
@@ -512,15 +512,15 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
   };
 
   const statusBadge = (s: string) => {
-    if (s === "active") return <Badge variant="green">active</Badge>;
-    if (s === "suspended") return <Badge variant="red">suspended</Badge>;
-    if (s === "pending_kyc") return <Badge variant="yellow">pending kyc</Badge>;
-    if (s === "pending_approval") return <Badge variant="yellow">pending approval</Badge>;
+    if (s === "active") return <Badge variant="green">{t("u_status_active")}</Badge>;
+    if (s === "suspended") return <Badge variant="red">{t("u_status_suspended")}</Badge>;
+    if (s === "pending_kyc") return <Badge variant="yellow">{t("u_status_pending_kyc")}</Badge>;
+    if (s === "pending_approval") return <Badge variant="yellow">{t("u_status_pending_approval")}</Badge>;
     return <Badge>{s}</Badge>;
   };
-  const kycBadge = (t: string) => {
-    if (t === "T2") return <Badge variant="purple">T2</Badge>;
-    if (t === "T1") return <Badge variant="blue">T1</Badge>;
+  const kycBadge = (tier: string) => {
+    if (tier === "T2") return <Badge variant="purple">T2</Badge>;
+    if (tier === "T1") return <Badge variant="blue">T1</Badge>;
     return <Badge variant="gray">T0</Badge>;
   };
 
@@ -532,7 +532,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
         <div className="flex items-center gap-3 bg-[#8247e5]/5 border border-[#8247e5]/20 rounded-sm px-4 py-3">
           <div className="w-5 h-5 rounded-sm bg-[#8247e5] flex items-center justify-center shrink-0"><Lock size={10} className="text-white" /></div>
           <div className="flex-1 min-w-0">
-            <span className="font-mono text-[14px] text-[#8247e5] uppercase tracking-widest">System Admin</span>
+            <span className="font-mono text-[14px] text-[#8247e5] uppercase tracking-widest">{t("u_system_admin")}</span>
             <span className="font-mono text-[14px] text-muted-foreground ml-2">{users.find((u) => u.id === systemAdminId)?.email ?? "—"}</span>
           </div>
           <span className="font-mono text-[13px] text-muted-foreground">{t("u_supabase_auto")}</span>
@@ -540,7 +540,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
       )}
       <div className="flex items-center gap-3">
         <input className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50"
-          placeholder="Search by email or wallet address..." value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
+          placeholder={t("u_search_placeholder")} value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
         {["all", "pending_approval", "active", "suspended", "pending_kyc"].map((f) => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-2 font-mono text-[13px] uppercase tracking-widest border rounded-sm transition-colors ${
@@ -550,12 +550,12 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                   : "bg-[#8247e5]/15 border-[#8247e5]/40 text-[#8247e5]"
                 : "border-border text-muted-foreground hover:text-foreground"
             }`}>
-            {f.replace(/_/g, " ")}
+            {t(`u_filter_${f}`)}
           </button>
         ))}
         <button onClick={() => setShowModal(true)}
           className="flex items-center gap-1.5 px-3 py-2 bg-[#8247e5] text-white font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#8247e5]/80 transition-colors">
-          <Plus size={12} /> New User
+          <Plus size={12} /> {t("u_new_user")}
         </button>
       </div>
 
@@ -568,8 +568,8 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                 <thead>
                   <tr className="border-b border-border">
                     {(selectedUser
-                      ? ["Email", "KYC", "Status", t("u_wallet_addresses"), "Joined", ""]
-                      : ["Email", t("u_col_partner"), "Wallet", t("u_col_wallet_status"), "Role", "KYC", "Status", "Joined", "Txns", ""]
+                      ? [t("u_col_email"), t("u_col_kyc"), t("u_col_status"), t("u_wallet_addresses"), t("u_col_joined"), ""]
+                      : [t("u_col_email"), t("u_col_partner"), t("u_col_wallet"), t("u_col_wallet_status"), t("u_col_role"), t("u_col_kyc"), t("u_col_status"), t("u_col_joined"), t("u_col_txns"), ""]
                     ).map((h) => (
                       <th key={h} className="px-4 py-2.5 text-left font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{h}</th>
                     ))}
@@ -617,11 +617,11 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                         )}
                         {!selectedUser && (
                           <td className="px-4 py-3">
-                            {u.wallet_status === "active" ? <Badge variant="green">active</Badge> : <Badge variant="gray">none</Badge>}
+                            {u.wallet_status === "active" ? <Badge variant="green">{t("u_wallet_active")}</Badge> : <Badge variant="gray">{t("u_wallet_none")}</Badge>}
                           </td>
                         )}
                         {!selectedUser && (
-                          <td className="px-4 py-3">{isAdmin ? <Badge variant="purple">system admin</Badge> : <Badge variant="gray">{u.role ?? "user"}</Badge>}</td>
+                          <td className="px-4 py-3">{isAdmin ? <Badge variant="purple">{t("u_role_system_admin")}</Badge> : <Badge variant="gray">{u.role === "user" ? t("u_role_user") : (u.role ?? t("u_role_user"))}</Badge>}</td>
                         )}
                         <td className="px-4 py-3">{kycBadge(u.kyc_tier)}</td>
                         <td className="px-4 py-3">{statusBadge(u.status)}</td>
@@ -661,7 +661,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                 </tbody>
               </table>
               <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
-                <span className="font-mono text-[13px] text-muted-foreground">{users.length} users</span>
+                <span className="font-mono text-[13px] text-muted-foreground">{users.length} {t("u_users_count")}</span>
                 {selectedUser && (
                   <span className="font-mono text-[12px] text-[#8247e5]">{t("u_row_hint")}</span>
                 )}
@@ -727,21 +727,21 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-card border border-border rounded-sm p-6 w-96">
             <div className="flex items-center justify-between mb-4">
-              <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">New User</span>
+              <span className="font-mono text-[13px] text-muted-foreground uppercase tracking-widest">{t("u_new_user")}</span>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground"><X size={14} /></button>
             </div>
             <form onSubmit={createUser} className="space-y-3">
-              <input required placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+              <input required placeholder={t("u_col_email")} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50" />
-              <input placeholder="Wallet Address (optional)" value={form.wallet_address} onChange={(e) => setForm({ ...form, wallet_address: e.target.value })}
+              <input placeholder={t("u_wallet_address_optional")} value={form.wallet_address} onChange={(e) => setForm({ ...form, wallet_address: e.target.value })}
                 className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#8247e5]/50" />
               <div className="grid grid-cols-2 gap-2">
                 <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
                   className="bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none">
-                  <option value="pending_approval">Pending Approval</option>
-                  <option value="active">Active</option>
-                  <option value="suspended">Suspended</option>
-                  <option value="pending_kyc">Pending KYC</option>
+                  <option value="pending_approval">{t("u_status_opt_pending_approval")}</option>
+                  <option value="active">{t("u_status_opt_active")}</option>
+                  <option value="suspended">{t("u_status_opt_suspended")}</option>
+                  <option value="pending_kyc">{t("u_status_opt_pending_kyc")}</option>
                 </select>
                 <select value={form.kyc_tier} onChange={(e) => setForm({ ...form, kyc_tier: e.target.value })}
                   className="bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none">
@@ -750,9 +750,9 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
               </div>
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
                 className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none">
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-                {role === "system_admin" && <option value="system_admin">System Admin</option>}
+                <option value="user">{t("u_role_opt_user")}</option>
+                <option value="admin">{t("u_role_opt_admin")}</option>
+                {role === "system_admin" && <option value="system_admin">{t("u_system_admin")}</option>}
               </select>
               <div className="space-y-1">
                 <label className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">{t("u_partner_affiliation")} <span className="text-[#ef4444]">*</span></label>
@@ -907,7 +907,7 @@ export function WalletsSection({ adminToken }: { adminEmail: string | null; admi
           </table>
           <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
             <span className="font-mono text-[13px] text-muted-foreground">{users.length} {t("w_users_unit")}</span>
-            <span className="font-mono text-[13px] text-muted-foreground">active: {activeCount} · none: {noneCount}</span>
+            <span className="font-mono text-[13px] text-muted-foreground">{t("u_wallet_active")}: {activeCount} · {t("u_wallet_none")}: {noneCount}</span>
           </div>
         </div>
       )}
