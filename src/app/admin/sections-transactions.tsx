@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { RefreshCw, ExternalLink } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, apiAuth, api } from "./shared";
 import { useI18n } from "../../lib/i18n";
 

@@ -4,7 +4,7 @@ import {
   Globe, Database, AlertCircle, Check, ShoppingCart, Clock,
   Plus, X, ImageOff, Pencil, Trash2, Search,
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, METHOD_COLORS, api } from "./shared";
 import { useI18n } from "../../lib/i18n";
 

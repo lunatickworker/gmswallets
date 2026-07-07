@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Globe, Lock, Zap, AlertTriangle, ToggleLeft, ToggleRight, RefreshCw } from "lucide-react";
 import { Badge, StatusDot, Spinner, StatCard, METHOD_COLORS, api } from "./shared";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { useI18n } from "../../lib/i18n";
 
 // ─── Uptime history (localStorage) ───────────────────────────────────────────

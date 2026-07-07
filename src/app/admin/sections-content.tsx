@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ToggleLeft, ToggleRight, Plus, X, Edit3, Trash2, Send } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard } from "./shared";
 import { useI18n } from "../../lib/i18n";
 

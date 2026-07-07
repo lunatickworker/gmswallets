@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw, EyeOff, Trash2, Save, Building2, Users, Copy } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { Badge, Spinner, StatCard, api, apiAuth } from "./shared";
 import { useI18n } from "../../lib/i18n";
 

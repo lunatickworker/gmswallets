@@ -15,7 +15,7 @@ import { generateAllChainWallets } from "./user/wallet";
 import { CHAINS_CONFIG, TOTAL_USD } from "./user/constants";
 import { useUsdToKrw } from "./user/hooks";
 import type { ChainWallet } from "./user/types";
-import { supabase } from "../lib/supabase";
+import { supabaseAdmin as supabase } from "../lib/supabase";
 import { StatusDot, Spinner, api, BASE } from "./admin/shared";
 import { DashboardSection } from "./admin/sections-dashboard";
 import { UsersSection, WalletsSection } from "./admin/sections-users";

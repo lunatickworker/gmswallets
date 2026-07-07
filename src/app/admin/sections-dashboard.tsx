@@ -7,7 +7,7 @@ import {
   ShieldCheck, AlertTriangle, ArrowUpRight, ArrowDownRight,
   Store, Network, CircleDollarSign, Activity,
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin as supabase } from "../../lib/supabase";
 import { projectId } from "../../../utils/supabase/info";
 import { StatusDot, Spinner, api } from "./shared";
 import { useI18n } from "../../lib/i18n";
