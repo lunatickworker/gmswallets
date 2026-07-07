@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { RefreshCw, ExternalLink } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { Badge, Spinner, StatCard } from "./shared";
+import { Badge, Spinner, StatCard, apiAuth, api } from "./shared";
 import { useI18n } from "../../lib/i18n";
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ function DateFilter({
 }
 
 // ─── PurchasesSection ─────────────────────────────────────────────────────────
-export function PurchasesSection() {
+export function PurchasesSection({ adminToken }: { adminToken?: string | null }) {
   const { t } = useI18n();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,14 +81,13 @@ export function PurchasesSection() {
   const fetchTxs = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("type", "purchase")
-        .order("created_at", { ascending: false });
+      // apiAuth 사용 → 서버에서 조직격리 적용
+      const data = adminToken
+        ? await apiAuth("/transactions?type=purchase", adminToken)
+        : await api("/transactions?type=purchase");
       setTxs(data ?? []);
     } catch { setTxs([]); } finally { setLoading(false); }
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => { fetchTxs(); }, [fetchTxs]);
 
@@ -155,7 +154,7 @@ export function PurchasesSection() {
 }
 
 // ─── SwapsSection ─────────────────────────────────────────────────────────────
-export function SwapsSection() {
+export function SwapsSection({ adminToken }: { adminToken?: string | null }) {
   const { t } = useI18n();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -169,14 +168,12 @@ export function SwapsSection() {
   const fetchTxs = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("type", "swap")
-        .order("created_at", { ascending: false });
+      const data = adminToken
+        ? await apiAuth("/transactions?type=swap", adminToken)
+        : await api("/transactions?type=swap");
       setTxs(data ?? []);
     } catch { setTxs([]); } finally { setLoading(false); }
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => { fetchTxs(); }, [fetchTxs]);
 
@@ -239,7 +236,7 @@ export function SwapsSection() {
 }
 
 // ─── TransactionsSection (전체거래) ───────────────────────────────────────────
-export function TransactionsSection() {
+export function TransactionsSection({ adminToken }: { adminToken?: string | null }) {
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -257,7 +254,16 @@ export function TransactionsSection() {
   const fetchTxs = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
+      // 조직격리: adminToken으로 허용된 파트너 ID 목록을 먼저 가져옴
+      let allowedPartnerIds: string[] | null = null;
+      if (adminToken) {
+        const partners = await apiAuth("/partners", adminToken);
+        if (Array.isArray(partners)) {
+          allowedPartnerIds = partners.map((p: any) => p.id);
+        }
+      }
+
+      let q = supabase
         .from("transactions")
         .select(`
           *,
@@ -270,9 +276,16 @@ export function TransactionsSection() {
         `)
         .order("created_at", { ascending: false })
         .limit(500);
+
+      // 비-system_admin: 허용된 파트너 소속 거래만 조회
+      if (allowedPartnerIds !== null) {
+        q = q.in("partner_id", allowedPartnerIds);
+      }
+
+      const { data } = await q;
       setTxs(data ?? []);
     } catch { setTxs([]); } finally { setLoading(false); }
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => { fetchTxs(); }, [fetchTxs]);
 

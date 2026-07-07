@@ -34,7 +34,6 @@ function UserDetailPanel({
   const [form, setForm] = useState({
     status: user.status ?? "active",
     kyc_tier: user.kyc_tier ?? "T0",
-    role: user.role ?? "user",
     partner_id: user.partner_id ?? "",
   });
   const [saving, setSaving] = useState(false);
@@ -64,7 +63,6 @@ function UserDetailPanel({
         body: JSON.stringify({
           status: form.status,
           kyc_tier: form.kyc_tier,
-          role: form.role,
           partner_id: form.partner_id || null,
         }),
       });
@@ -284,19 +282,6 @@ function UserDetailPanel({
               </div>
 
               <div className="space-y-1">
-                <label className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">{t("u_role_label")}</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  disabled={isSystemAdmin}
-                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none focus:border-[#8247e5]/50 disabled:opacity-50">
-                  <option value="user">{t("u_role_opt_user")}</option>
-                  <option value="admin">{t("u_role_opt_admin")}</option>
-                  <option value="system_admin">{t("u_system_admin")}</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
                 <label className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">{t("u_partner_affiliation")}</label>
                 <select
                   value={form.partner_id}
@@ -393,7 +378,7 @@ function UserDetailPanel({
 
 // ─── UsersSection ─────────────────────────────────────────────────────────────
 
-export function UsersSection({ adminEmail, role = "system_admin", partnerId = null }: { adminEmail: string; role?: string; partnerId?: string | null }) {
+export function UsersSection({ adminEmail, adminToken, role = "system_admin", partnerId = null }: { adminEmail: string; adminToken?: string | null; role?: string; partnerId?: string | null }) {
   const { t } = useI18n();
   const [users, setUsers] = useState<any[]>([]);
   const [allWallets, setAllWallets] = useState<any[]>([]);
@@ -416,41 +401,28 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       if (filter !== "all") params.set("status", filter);
+      // adminToken이 있으면 apiAuth(사용자 JWT)로 호출 → 서버에서 조직격리 적용
+      const fetchFn = adminToken
+        ? (path: string) => apiAuth(path, adminToken)
+        : api;
       const [data, { data: walletRows }, partnersData] = await Promise.all([
-        api(`/users?${params}`),
+        fetchFn(`/users?${params}`),
         supabase.from("wallets").select("user_id, address, chain_name, chain_id, network, is_primary, derivation_path"),
-        api("/partners"),
+        fetchFn("/partners"),
       ]);
       setAllWallets(walletRows ?? []);
 
-      // 조직격리: role/partnerId 기반으로 접근 가능한 파트너 id 집합 계산
+      // 파트너 맵 구성 (서버가 이미 조직격리된 목록을 반환)
       const allPartnersArr: any[] = partnersData ?? [];
-      let allowedIds: Set<string> | null = null;
-      if (role !== "system_admin" && partnerId) {
-        allowedIds = new Set<string>();
-        allowedIds.add(partnerId);
-        for (const p of allPartnersArr) {
-          if (p.parent_id === partnerId) {
-            allowedIds.add(p.id);
-            // 2단계 하위 (마스터 → 총판 → 매장)
-            for (const pp of allPartnersArr) {
-              if (pp.parent_id === p.id) allowedIds.add(pp.id);
-            }
-          }
-        }
-      }
-
       const pMap: Record<string, { name: string; role: string; code: string }> = {};
       const pList: { id: string; name: string; role: string; code: string }[] = [];
       for (const a of allPartnersArr) {
-        // 조직격리: allowedIds가 있으면 해당 파트너만 포함
-        if (allowedIds && !allowedIds.has(a.id)) continue;
         pMap[a.id] = { name: a.name, role: a.type, code: a.code ?? "" };
         pList.push({ id: a.id, name: a.name, role: a.type, code: a.code ?? "" });
       }
       setPartnerMap(pMap);
       setPartnerList(pList);
-      const users = (data ?? []).map((u: any) => {
+      const allUsers = (data ?? []).map((u: any) => {
         const uw = (walletRows ?? []).filter((w: any) => w.user_id === u.id);
         const primary = uw.find((w: any) => w.is_primary) ?? uw.find((w: any) => w.chain_name === "polygon") ?? uw[0];
         return {
@@ -460,21 +432,20 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
           _wallet_count: uw.length,
         };
       });
-      // Org isolation: non-system_admin cannot see system_admin accounts
-      // Self-exclusion: logged-in admin should not appear in the list
-      const filteredUsers = users.filter((u: any) => {
+      // 클라이언트 2차 방어: partner_id가 없는 유저는 비-system_admin에게 노출 금지
+      const filteredUsers = allUsers.filter((u: any) => {
         if (u.email === adminEmail) return false;
-        if (u.role === "system_admin") return role === "system_admin";
+        if (role !== "system_admin" && !u.partner_id) return false;
         return true;
       });
       setUsers(filteredUsers);
       // Refresh selected user data if panel is open
       if (selectedUser) {
-        const updated = users.find((u: any) => u.id === selectedUser.id);
+        const updated = filteredUsers.find((u: any) => u.id === selectedUser.id);
         if (updated) setSelectedUser(updated);
       }
     } catch { setUsers([]); } finally { setLoading(false); }
-  }, [search, filter, role, partnerId]);
+  }, [search, filter, role, partnerId, adminToken]);
 
   const openWalletModal = (e: React.MouseEvent, u: any) => {
     e.stopPropagation();
@@ -748,12 +719,6 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
                   <option>T0</option><option>T1</option><option>T2</option>
                 </select>
               </div>
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
-                className="w-full bg-secondary border border-border rounded-sm px-3 py-2 font-mono text-sm text-foreground focus:outline-none">
-                <option value="user">{t("u_role_opt_user")}</option>
-                <option value="admin">{t("u_role_opt_admin")}</option>
-                {role === "system_admin" && <option value="system_admin">{t("u_system_admin")}</option>}
-              </select>
               <div className="space-y-1">
                 <label className="font-mono text-[12px] text-muted-foreground uppercase tracking-widest">{t("u_partner_affiliation")} <span className="text-[#ef4444]">*</span></label>
                 <select required value={form.partner_id} onChange={(e) => setForm({ ...form, partner_id: e.target.value })}
@@ -778,7 +743,7 @@ export function UsersSection({ adminEmail, role = "system_admin", partnerId = nu
 
 // ─── WalletsSection ───────────────────────────────────────────────────────────
 
-export function WalletsSection({ adminToken }: { adminEmail: string | null; adminToken: string | null; role?: string }) {
+export function WalletsSection({ adminToken }: { adminEmail: string | null; adminToken: string | null; role?: string; partnerId?: string | null }) {
   const { t } = useI18n();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

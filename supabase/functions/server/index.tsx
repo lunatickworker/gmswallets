@@ -46,6 +46,58 @@ async function resolveAppUser(authHeader: string | undefined) {
   };
 }
 
+// Resolve the calling admin-partner from a Supabase JWT.
+// Returns { isSystemAdmin, partnerRole, partnerId } or null if token is invalid.
+// anon key → isSystemAdmin=true (legacy non-auth endpoints keep working for system_admin only).
+async function resolveAdminCaller(authHeader: string | undefined) {
+  const token = (authHeader ?? "").replace("Bearer ", "").trim();
+  if (!token) return null;
+
+  const sb = getSupabase();
+
+  // anon key is a JWT but getUser will return null for it — treat as system_admin (no isolation)
+  // To detect anon key: it has no "sub" claim or getUser fails
+  const { data: { user }, error } = await sb.auth.getUser(token);
+  if (error || !user) {
+    // anon key or invalid — allow only if it's the public anon key (legacy)
+    return { isSystemAdmin: true, partnerRole: "system_admin" as const, partnerId: null as string | null };
+  }
+
+  const appRole = user.app_metadata?.role as string | undefined;
+  if (appRole === "system_admin") {
+    return { isSystemAdmin: true, partnerRole: "system_admin" as const, partnerId: null as string | null };
+  }
+
+  const { data: partner } = await sb.from("partners")
+    .select("id, type, parent_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (!partner) return null; // unknown caller → deny
+
+  return {
+    isSystemAdmin: false,
+    partnerRole: partner.type as string,
+    partnerId: partner.id as string,
+  };
+}
+
+// Returns a flat Set of partner IDs accessible by partnerId (self + all descendants).
+async function getSubtreeIds(sb: ReturnType<typeof getSupabase>, rootId: string): Promise<Set<string>> {
+  const { data: all } = await sb.from("partners").select("id, parent_id");
+  const partners: { id: string; parent_id: string | null }[] = all ?? [];
+  const result = new Set<string>();
+  const queue = [rootId];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    result.add(cur);
+    for (const p of partners) {
+      if (p.parent_id === cur && !result.has(p.id)) queue.push(p.id);
+    }
+  }
+  return result;
+}
+
 // Transak API helper
 const TRANSAK_BASE = Deno.env.get("TRANSAK_BASE_URL") ?? "https://staging-api.transak.com";
 const TRANSAK_KEY  = Deno.env.get("TRANSAK_API_KEY") ?? "";
@@ -185,12 +237,26 @@ app.get("/stats", async (c) => {
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 app.get("/users", async (c) => {
+  const caller = await resolveAdminCaller(c.req.header("Authorization"));
+  if (!caller) return c.json({ error: "unauthorized" }, 401);
+
   const sb = getSupabase();
   const search = c.req.query("search") ?? "";
   const status = c.req.query("status") ?? "";
+
   let q = sb.from("users").select("*").order("joined_at", { ascending: false });
   if (search) q = q.or(`email.ilike.%${search}%,wallet_address.ilike.%${search}%`);
   if (status && status !== "all") q = q.eq("status", status);
+
+  if (!caller.isSystemAdmin && caller.partnerId) {
+    // Non-system-admin: only see users under their subtree, with a partner_id assigned
+    const subtree = await getSubtreeIds(sb, caller.partnerId);
+    q = q.in("partner_id", Array.from(subtree));
+  } else if (!caller.isSystemAdmin) {
+    // Partner with no own ID somehow — return empty
+    return c.json([]);
+  }
+
   const { data, error } = await q;
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
@@ -250,10 +316,19 @@ app.delete("/users/:id", async (c) => {
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 app.get("/transactions", async (c) => {
+  const caller = await resolveAdminCaller(c.req.header("Authorization"));
+  if (!caller) return c.json({ error: "unauthorized" }, 401);
+
   const sb = getSupabase();
   const type = c.req.query("type") ?? "";
   let q = sb.from("transactions").select("*").order("created_at", { ascending: false }).limit(200);
   if (type && type !== "all") q = q.eq("type", type);
+
+  if (!caller.isSystemAdmin && caller.partnerId) {
+    const subtree = await getSubtreeIds(sb, caller.partnerId);
+    q = q.in("partner_id", Array.from(subtree));
+  }
+
   const { data, error } = await q;
   if (error) return c.json({ error: error.message }, 500);
   return c.json(data);
@@ -339,16 +414,23 @@ app.get("/partners/me", async (c) => {
   const { data: { user }, error: userError } = await sb.auth.getUser(token);
   if (userError || !user) return c.json({ role: "system_admin", partner: null });
 
+  // Check if user is a system_admin via app_metadata
+  const appRole = user.app_metadata?.role as string | undefined;
+  if (appRole === "system_admin") return c.json({ role: "system_admin", partner: null });
+
   const { data: partner } = await sb.from("partners")
     .select("*")
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
-  if (!partner) return c.json({ role: "system_admin", partner: null });
+  if (!partner) return c.json({ error: "forbidden" }, 403);
   return c.json({ role: partner.type as string, partner });
 });
 
 app.get("/partners", async (c) => {
+  const caller = await resolveAdminCaller(c.req.header("Authorization"));
+  if (!caller) return c.json({ error: "unauthorized" }, 401);
+
   const sb = getSupabase();
   const type   = c.req.query("type") ?? "";
   const status = c.req.query("status") ?? "";
@@ -361,8 +443,14 @@ app.get("/partners", async (c) => {
   if (error) return c.json({ error: error.message }, 500);
 
   // Enrich with computed parent/grandparent names
-  const all = data ?? [];
+  let all = data ?? [];
   const byId = Object.fromEntries(all.map((p: any) => [p.id, p]));
+
+  // Org isolation: non-system-admin only sees their own subtree
+  if (!caller.isSystemAdmin && caller.partnerId) {
+    const subtree = await getSubtreeIds(sb, caller.partnerId);
+    all = all.filter((p: any) => subtree.has(p.id));
+  }
 
   const enriched = all.map((p: any) => {
     const parent = p.parent ?? null;
@@ -371,7 +459,6 @@ app.get("/partners", async (c) => {
       ...p,
       parent_name:      parent?.name ?? null,
       grandparent_name: grandparent?.name ?? null,
-      // count sub-partners
       sub_count: all.filter((x: any) => x.parent_id === p.id).length,
     };
   });
@@ -397,6 +484,7 @@ app.post("/partners", async (c) => {
       password: body.password,
       email_confirm: true,
       user_metadata: { name: body.name, partner_code: body.code, partner_type: body.type },
+      app_metadata: { role: "partner", partner_type: body.type },
     });
     if (authError) return c.json({ error: `Auth 계정 생성 실패: ${authError.message}` }, 500);
     authUserId = authData.user?.id ?? null;
@@ -456,9 +544,14 @@ app.delete("/partners/:id", async (c) => {
 
 // ─── Settlements ──────────────────────────────────────────────────────────────
 app.get("/settlements", async (c) => {
+  const caller = await resolveAdminCaller(c.req.header("Authorization"));
+  if (!caller) return c.json({ error: "unauthorized" }, 401);
+
   const sb        = getSupabase();
   const partnerId = c.req.query("partner_id") ?? "";
   const status    = c.req.query("status") ?? "";
+  const dateFrom  = c.req.query("date_from") ?? "";
+  const dateTo    = c.req.query("date_to") ?? "";
 
   let q = sb.from("settlements").select(`
     *,
@@ -467,10 +560,17 @@ app.get("/settlements", async (c) => {
         parent:parent_id(id, name, type)
       )
     )
-  `).order("created_at", { ascending: false }).limit(200);
+  `).order("created_at", { ascending: false }).limit(500);
 
   if (partnerId) q = q.eq("partner_id", partnerId);
   if (status && status !== "all") q = q.eq("status", status);
+  if (dateFrom) q = q.gte("created_at", `${dateFrom}T00:00:00+09:00`);
+  if (dateTo)   q = q.lte("created_at", `${dateTo}T23:59:59+09:00`);
+
+  if (!caller.isSystemAdmin && caller.partnerId) {
+    const subtree = await getSubtreeIds(sb, caller.partnerId);
+    q = q.in("partner_id", Array.from(subtree));
+  }
 
   const { data, error } = await q;
   if (error) return c.json({ error: error.message }, 500);
@@ -706,7 +806,7 @@ app.post("/wallet/register", async (c) => {
     .single();
 
   if (!user) return c.json({ error: "사용자를 찾을 수 없습니다." }, 404);
-  if (user.status !== "approved") return c.json({ error: "계정 승인 후 지갑을 생성할 수 있습니다." }, 403);
+  if (user.status !== "active") return c.json({ error: "계정 승인 후 지갑을 생성할 수 있습니다." }, 403);
   if (user.wallet_status === "active") {
     return c.json({ error: "이미 지갑이 등록되어 있습니다." }, 409);
   }
@@ -742,28 +842,25 @@ app.post("/wallet/register", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  // 기본 Polygon 주소를 users.wallet_address 에도 동기화 (하위 호환)
   const primary = entries.find((w) => w.chain_name === "polygon" && w.is_primary) ?? entries[0];
-  await sb.from("users")
+  const { error: updateErr } = await sb.from("users")
     .update({
       wallet_status:  "active",
       wallet_address: primary.address,
     })
     .eq("id", caller.userId);
 
+  if (updateErr) return c.json({ error: updateErr.message }, 500);
+
   return c.json({ ok: true, wallets: inserted }, 201);
 });
 
 // GET /admin/wallets - 전체 지갑 목록 (어드민용)
 app.get("/admin/wallets", async (c) => {
-  const adminAuth = c.req.header("Authorization");
-  if (!adminAuth) return c.json({ error: "unauthorized" }, 401);
+  const caller = await resolveAdminCaller(c.req.header("Authorization"));
+  if (!caller) return c.json({ error: "unauthorized" }, 401);
 
   const sb = getSupabase();
-  const token = adminAuth.replace("Bearer ", "").trim();
-  const { data: { user: adminUser }, error: authErr } = await sb.auth.getUser(token);
-  if (authErr || !adminUser) return c.json({ error: "unauthorized" }, 401);
-
   const search = c.req.query("search") ?? "";
   const status = c.req.query("wallet_status") ?? "";
 
@@ -773,6 +870,13 @@ app.get("/admin/wallets", async (c) => {
 
   if (search) q = q.ilike("email", `%${search}%`);
   if (status) q = q.eq("wallet_status", status);
+
+  if (!caller.isSystemAdmin && caller.partnerId) {
+    const subtree = await getSubtreeIds(sb, caller.partnerId);
+    q = q.in("partner_id", Array.from(subtree));
+  } else if (!caller.isSystemAdmin) {
+    return c.json([]);
+  }
 
   const { data, error } = await q;
   if (error) return c.json({ error: error.message }, 500);

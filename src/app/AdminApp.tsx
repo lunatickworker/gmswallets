@@ -29,7 +29,7 @@ import { useI18n, LanguageSwitcher } from "../lib/i18n";
 
 // ─── Login Gate ───────────────────────────────────────────────────────────────
 
-function LoginScreen({ onLogin }: { onLogin: (email: string, accessToken: string) => void }) {
+function LoginScreen({ onLogin }: { onLogin: (email: string, accessToken: string) => Promise<void> }) {
   const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +48,7 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, accessToken: string
         action: "admin_login",
         detail: { timestamp: new Date().toISOString() },
       });
-      onLogin(data.user?.email ?? email, data.session?.access_token ?? "");
+      await onLogin(data.user?.email ?? email, data.session?.access_token ?? "");
     } catch (err: any) {
       setError(err.message ?? t("error_generic"));
     } finally {
@@ -889,6 +889,12 @@ export default function AdminApp() {
           const res = await fetch(`${BASE}/partners/me`, {
             headers: { Authorization: `Bearer ${session.access_token}` },
           });
+          if (!res.ok) {
+            await supabase.auth.signOut();
+            setUserEmail(null);
+            setCheckingAuth(false);
+            return;
+          }
           const info: { role: PartnerRole; partner: { id: string; name: string } | null } = await res.json();
           setPartnerRole(info.role ?? "system_admin");
           setPartnerName(info.partner?.name ?? null);
@@ -925,23 +931,23 @@ export default function AdminApp() {
   if (checkingAuth) return <div className="min-h-screen bg-background flex items-center justify-center"><Spinner /></div>;
 
   const handleLogin = async (email: string, accessToken: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    const res = await fetch(`${BASE}/partners/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      await supabase.auth.signOut();
+      throw new Error("관리자 권한이 없는 계정입니다.");
+    }
+    const data: { role: PartnerRole; partner: { id: string; name: string } | null } = await res.json();
     setUserEmail(email);
     setAdminToken(accessToken);
-    const { data: { user } } = await supabase.auth.getUser();
     if (user?.id) setUserId(user.id);
-    try {
-      const res = await fetch(`${BASE}/partners/me`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const data: { role: PartnerRole; partner: { id: string; name: string } | null } = await res.json();
-      setPartnerRole(data.role ?? "system_admin");
-      setPartnerName(data.partner?.name ?? null);
-      setPartnerId(data.partner?.id ?? null);
-      const allowed = ROLE_ALLOWED[data.role ?? "system_admin"];
-      setActive(allowed[0] as NavSection);
-    } catch {
-      setPartnerRole("system_admin");
-    }
+    setPartnerRole(data.role ?? "system_admin");
+    setPartnerName(data.partner?.name ?? null);
+    setPartnerId(data.partner?.id ?? null);
+    const allowed = ROLE_ALLOWED[data.role ?? "system_admin"];
+    setActive(allowed[0] as NavSection);
   };
 
   if (!userEmail) return <LoginScreen onLogin={handleLogin} />;
@@ -949,18 +955,18 @@ export default function AdminApp() {
   const renderSection = () => {
     switch (active) {
       case "dashboard":    return <DashboardSection role={partnerRole} partnerId={partnerId} partnerName={partnerName} />;
-      case "users":        return <UsersSection adminEmail={userEmail} role={partnerRole} partnerId={partnerId} />;
-      case "wallets":      return <WalletsSection adminEmail={userEmail} adminToken={adminToken} role={partnerRole} />;
-      case "purchases":    return <PurchasesSection />;
-      case "swaps":        return <SwapsSection />;
-      case "transactions": return <TransactionsSection />;
+      case "users":        return <UsersSection adminEmail={userEmail} adminToken={adminToken} role={partnerRole} partnerId={partnerId} />;
+      case "wallets":      return <WalletsSection adminEmail={userEmail} adminToken={adminToken} role={partnerRole} partnerId={partnerId} />;
+      case "purchases":    return <PurchasesSection adminToken={adminToken} />;
+      case "swaps":        return <SwapsSection adminToken={adminToken} />;
+      case "transactions": return <TransactionsSection adminToken={adminToken} />;
       case "blockchain":   return <BlockchainSection />;
       case "webhooks":     return <WebhooksSection />;
       case "notices":      return <NoticesSection adminEmail={userEmail} />;
       case "push":         return <PushSection adminEmail={userEmail} />;
       case "support":      return <SupportSection adminEmail={userEmail} />;
-      case "partners":     return <PartnersSection role={partnerRole} partnerId={partnerId} partnerName={partnerName} />;
-      case "settlements":  return <SettlementsSection />;
+      case "partners":     return <PartnersSection adminToken={adminToken} role={partnerRole} partnerId={partnerId} partnerName={partnerName} />;
+      case "settlements":  return <SettlementsSection adminToken={adminToken} />;
       case "fees":         return <FeesSection adminEmail={userEmail} role={partnerRole} partnerId={partnerId} />;
       case "coins":          return <CoinsSection adminEmail={userEmail} />;
       case "oplogs":         return <OpLogsSection />;

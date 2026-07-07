@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { AlertTriangle, ChevronRight, Circle, Plus, X, Edit3, Check, RefreshCw, EyeOff, Trash2, Save, Building2, Users, Copy } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { Badge, Spinner, StatCard, api } from "./shared";
+import { Badge, Spinner, StatCard, api, apiAuth } from "./shared";
 import { useI18n } from "../../lib/i18n";
 
 // ─── Partner types and mock data ──────────────────────────────────────────────
@@ -620,7 +620,7 @@ function PartnerDetailPanel({
 
 // ─── PartnersSection ──────────────────────────────────────────────────────────
 
-export function PartnersSection({ role = "system_admin", partnerId = null, partnerName = null }: { role?: string; partnerId?: string | null; partnerName?: string | null }) {
+export function PartnersSection({ adminToken, role = "system_admin", partnerId = null, partnerName = null }: { adminToken?: string | null; role?: string; partnerId?: string | null; partnerName?: string | null }) {
   const { t } = useI18n();
   type Tab = "master" | "distributor" | "store";
 
@@ -641,11 +641,12 @@ export function PartnersSection({ role = "system_admin", partnerId = null, partn
   const fetchPartners = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api("/partners");
+      // adminToken이 있으면 apiAuth → 서버에서 조직격리 적용
+      const data = adminToken ? await apiAuth("/partners", adminToken) : await api("/partners");
       setAllPartners(data ?? []);
     } catch { setAllPartners([]); }
     finally { setLoading(false); }
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => { fetchPartners(); }, [fetchPartners]);
 
@@ -973,7 +974,8 @@ function generateMockSettlements(): Settlement[] {
     { symbol: "MATIC", rate: 950 },
     { symbol: "USDT", rate: 1340 },
   ];
-  const baseDate = new Date("2024-06-01T09:00:00Z");
+  const now = new Date();
+  const baseDate = new Date(now.getFullYear(), now.getMonth(), 1, 9, 0, 0);
   for (let i = 0; i < 20; i++) {
     const store = storePool[i % storePool.length];
     const user  = users[i % users.length];
@@ -1039,7 +1041,7 @@ type StoreGroup = {
   items: Settlement[];
 };
 
-export function SettlementsSection() {
+export function SettlementsSection({ adminToken }: { adminToken?: string | null }) {
   const { t } = useI18n();
   const [rawSettlements, setRawSettlements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1055,16 +1057,24 @@ export function SettlementsSection() {
   const [settling, setSettling] = useState(false);
   const [viewMode, setViewMode] = useState<"store" | "all">("store");
 
-  const fetchSettlements = useCallback(async () => {
+  const fetchSettlements = useCallback(async (from?: string, to?: string) => {
     setLoading(true);
     try {
-      const data = await api("/settlements");
+      const params = new URLSearchParams();
+      if (from) params.set("date_from", from);
+      if (to)   params.set("date_to", to);
+      const qs = params.toString();
+      const url = `/settlements${qs ? `?${qs}` : ""}`;
+      const data = adminToken ? await apiAuth(url, adminToken) : await api(url);
       setRawSettlements(data ?? []);
     } catch { setRawSettlements([]); }
     finally { setLoading(false); }
-  }, []);
+  }, [adminToken]);
 
-  useEffect(() => { fetchSettlements(); }, [fetchSettlements]);
+  useEffect(() => {
+    const { from, to } = getSDateBounds(datePreset, dateFrom, dateTo);
+    fetchSettlements(from, to);
+  }, [fetchSettlements, datePreset, dateFrom, dateTo]);
 
   // Map API response to Settlement UI shape
   const settlements: Settlement[] = rawSettlements.map((s: any) => {
@@ -1146,7 +1156,8 @@ export function SettlementsSection() {
       const pendingIds = rawSettlements.filter((s) => s.status === "pending").map((s) => s.partner_id);
       if (pendingIds.length > 0) {
         await api("/settlements/bulk", { method: "POST", body: JSON.stringify({ partner_ids: pendingIds, memo: "일괄정산" }) });
-        await fetchSettlements();
+        const { from, to } = getSDateBounds(datePreset, dateFrom, dateTo);
+        await fetchSettlements(from, to);
       }
     } finally { setSettling(false); }
   };
@@ -1222,7 +1233,7 @@ export function SettlementsSection() {
             {v === "store" ? "매장별 집계" : "전체 내역"}
           </button>
         ))}
-        <button onClick={fetchSettlements} className="p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /></button>
+        <button onClick={() => { const { from, to } = getSDateBounds(datePreset, dateFrom, dateTo); fetchSettlements(from, to); }} className="p-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground transition-colors"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /></button>
         {rawSettlements.some((s) => s.status === "pending") && (
           <button onClick={settlePending} disabled={settling}
             className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#00d395] text-background font-mono text-[13px] uppercase tracking-widest rounded-sm hover:bg-[#00d395]/80 disabled:opacity-50 transition-colors">
